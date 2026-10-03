@@ -108,9 +108,6 @@ func TestProfileValidationAndPersistenceFailure(t *testing.T) {
 }
 
 func TestProfileLibraryLimits(t *testing.T) {
-	if _, err := importConfig("mode: rule\n" + strings.Repeat("#", 6000)); err == nil {
-		t.Fatal("oversized content accepted")
-	}
 	a := testApp(t, "")
 	a.state.Profiles = make([]Profile, 100)
 	if request(a, "POST", "/api/profiles", `{"name":"Extra","content":"mode: rule"}`).Code != 409 {
@@ -136,11 +133,11 @@ func TestNetworkImport(t *testing.T) {
 		case "/loop":
 			http.Redirect(w, r, "/loop", http.StatusFound)
 		case "/large":
-			w.Header().Set("Content-Length", "6001")
-			fmt.Fprint(w, strings.Repeat("x", 6001))
+			w.Header().Set("Content-Length", fmt.Sprint((1<<20)+1))
+			fmt.Fprint(w, strings.Repeat("x", (1<<20)+1))
 		case "/chunked":
 			w.(http.Flusher).Flush()
-			fmt.Fprint(w, strings.Repeat("x", 6001))
+			fmt.Fprint(w, strings.Repeat("x", (1<<20)+1))
 		case "/unsupported":
 			fmt.Fprint(w, "proxies: []")
 		case "/empty":
@@ -254,5 +251,36 @@ func TestNetworkImportOptionalName(t *testing.T) {
 				t.Fatalf("duplicate: %d %s", duplicate.Code, duplicate.Body.String())
 			}
 		})
+	}
+}
+
+func TestLargeImports(t *testing.T) {
+	// Valid imports larger than the previous file and API limits remain accepted.
+	content := "mode: rule\n#" + strings.Repeat("x", 2<<20)
+	if _, err := importConfig(content); err != nil {
+		t.Fatalf("large import: %v", err)
+	}
+	// Control bytes in YAML comments expand sixfold when JSON-encoded.
+	escaped := "mode: direct\n#" + strings.Repeat("\x01", 2<<20)
+	a := testApp(t, "")
+	body, _ := json.Marshal(map[string]string{"name": "Large local", "content": escaped})
+	if w := request(a, "POST", "/api/profiles", string(body)); w.Code != 201 {
+		t.Fatalf("large local import: %d %s", w.Code, w.Body.String())
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chunked" {
+			w.(http.Flusher).Flush()
+		}
+		fmt.Fprint(w, content)
+	}))
+	defer server.Close()
+	for _, path := range []string{"/regular", "/chunked"} {
+		body, _ = json.Marshal(map[string]string{"name": "Large network " + path, "url": server.URL + path})
+		if w := request(a, "POST", "/api/profiles", string(body)); w.Code != 201 {
+			t.Fatalf("large network import: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if len(a.state.Profiles) != 3 {
+		t.Fatal("large imports not saved")
 	}
 }

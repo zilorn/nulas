@@ -15,8 +15,6 @@ import (
 	"time"
 )
 
-const maxImportBytes = 6000
-
 const networkImportTimeout = 15 * time.Second
 
 type Profile struct {
@@ -42,9 +40,6 @@ func importConfig(content string) (Config, error) {
 func importNamedConfig(content string) (importedConfig, error) {
 	c := importedConfig{Config: Config{7890, "rule", false, false, "info"}}
 	content = strings.TrimSpace(strings.TrimPrefix(content, "\ufeff"))
-	if len(content) > maxImportBytes {
-		return c, errors.New("导入内容不能超过 6 KB")
-	}
 	if content == "" {
 		return c, errors.New("配置内容不能为空")
 	}
@@ -206,15 +201,9 @@ func fetchImportConfig(ctx context.Context, raw string) (importedConfig, error) 
 	if response.StatusCode != http.StatusOK {
 		return importedConfig{}, fmt.Errorf("配置下载失败：HTTP %d", response.StatusCode)
 	}
-	if response.ContentLength > maxImportBytes {
-		return importedConfig{}, errors.New("导入内容不能超过 6 KB")
-	}
-	content, err := io.ReadAll(io.LimitReader(response.Body, maxImportBytes+1))
+	content, err := io.ReadAll(response.Body)
 	if err != nil {
 		return importedConfig{}, errors.New("配置下载未完成，请重试")
-	}
-	if len(content) > maxImportBytes {
-		return importedConfig{}, errors.New("导入内容不能超过 6 KB")
 	}
 	return importNamedConfig(string(content))
 }
@@ -236,7 +225,7 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 			Content *string `json:"content"`
 			URL     *string `json:"url"`
 		}
-		if err := decode(w, r, &body); err != nil {
+		if err := decodeJSON(r.Body, &body); err != nil {
 			fail(w, 400, err)
 			return
 		}

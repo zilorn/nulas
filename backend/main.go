@@ -136,7 +136,11 @@ func fail(w http.ResponseWriter, status int, err error) {
 	reply(w, status, map[string]string{"error": err.Error()})
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
+	return decodeJSON(http.MaxBytesReader(w, r.Body, 8192), v)
+}
+
+func decodeJSON(reader io.Reader, v any) error {
+	d := json.NewDecoder(reader)
 	d.DisallowUnknownFields()
 	if e := d.Decode(v); e != nil {
 		return e
