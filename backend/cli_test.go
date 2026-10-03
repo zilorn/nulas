@@ -74,7 +74,7 @@ func TestCLIFailureIsVisible(t *testing.T) {
 }
 
 func TestCLIHelpAndInvalidArguments(t *testing.T) {
-	for _, args := range [][]string{{"--help"}, {"help"}, {"-h"}, {"unknown"}, {"start", "extra"}} {
+	for _, args := range [][]string{{"--help"}, {"help"}, {"-h"}, {"unknown"}, {"start", "extra"}, {"uninstall", "extra"}, {"remove", "extra"}} {
 		var stdout, stderr bytes.Buffer
 		want := 2
 		if len(args) == 1 && args[0] != "unknown" {
@@ -116,6 +116,18 @@ func TestCLIInstallUsesExecutableLocation(t *testing.T) {
 	if code := runCLI([]string{"install"}, &stdout, &stderr, run, executable); code != 0 {
 		t.Fatalf("%d: %s", code, &stderr)
 	}
+	runUninstall := func(ctx context.Context, _, _ io.Writer, name string, args ...string) error {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("uninstall lacks timeout")
+		}
+		if name != "custom-python" || !reflect.DeepEqual(args, []string{installer, "--uninstall"}) {
+			t.Fatalf("%s %v", name, args)
+		}
+		return errors.New("stop failed")
+	}
+	if code := runCLI([]string{"uninstall"}, &stdout, &stderr, runUninstall, executable); code == 0 {
+		t.Fatal("uninstall failure reported success")
+	}
 	if err := os.Remove(installer); err != nil {
 		t.Fatal(err)
 	}
@@ -152,5 +164,34 @@ func TestCLIUpdateDelegation(t *testing.T) {
 	t.Setenv("NULAS_INSTALL_HOME", "")
 	if code := runCLI([]string{"update"}, &stdout, &stderr, nil, func() (string, error) { return binary, nil }); code == 0 {
 		t.Fatal("unmanaged install allowed update")
+	}
+}
+
+func TestCLIRemoveDelegation(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "nulas")
+	if err := os.WriteFile(binary, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NULAS_INSTALL_HOME", root)
+	t.Setenv("NULAS_PYTHON", "custom-python")
+	var stdout, stderr bytes.Buffer
+	run := func(ctx context.Context, _, _ io.Writer, name string, args ...string) error {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("remove lacks timeout")
+		}
+		want := []string{filepath.Join(filepath.Dir(root), "scripts", "setup.py"), "remove", "--home", root}
+		if name != "custom-python" || !reflect.DeepEqual(args, want) {
+			t.Fatalf("%s %v", name, args)
+		}
+		return errors.New("removal failed")
+	}
+	executable := func() (string, error) { return binary, nil }
+	if code := runCLI([]string{"remove"}, &stdout, &stderr, run, executable); code == 0 {
+		t.Fatal("removal failure reported success")
+	}
+	t.Setenv("NULAS_INSTALL_HOME", "")
+	if code := runCLI([]string{"remove"}, &stdout, &stderr, nil, executable); code == 0 {
+		t.Fatal("unmanaged installation allowed removal")
 	}
 }

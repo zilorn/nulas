@@ -210,6 +210,109 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(setup.load(home)['error'], 'network unavailable')
             self.assertEqual(setup.load(home)['current'], 'old')
 
+    def removal_fixture(self, home):
+        release = home / 'releases/current'
+        release.mkdir(parents=True)
+        for name in ('source', 'tools', 'bin', 'data', 'runtime'):
+            (home / name).mkdir()
+            (home / name / 'keep').write_text(name)
+        setup.atomic_json(home / 'installation.json', {'current': str(release)})
+        return release
+
+    def test_remove_preserves_data_runtime_and_unrelated_shell_settings(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
+            user = Path(directory)
+            home = user / 'nulas'
+            self.removal_fixture(home)
+            (home / 'custom-file').write_text('keep')
+            (user / '.bashrc').write_text('alias keep=true\n')
+            setup.add_path(home, user)
+            real_add_path = setup.add_path
+            with patch.object(setup, 'add_path', side_effect=lambda h, remove: real_add_path(h, user, remove)), \
+                    patch('install_service.uninstall_service') as uninstall:
+                setup.remove(home)
+                if sys.platform == 'linux':
+                    uninstall.assert_called_once_with(home)
+            self.assertEqual((user / '.bashrc').read_text(), 'alias keep=true\n')
+            self.assertFalse((user / '.config/fish/conf.d/nulas.fish').exists())
+            for name in ('data', 'runtime'):
+                self.assertEqual((home / name / 'keep').read_text(), name)
+            self.assertEqual((home / 'custom-file').read_text(), 'keep')
+            for name in ('source', 'releases', 'tools', 'bin', 'installation.json', '.update-lock'):
+                self.assertFalse((home / name).exists())
+
+    def test_remove_rejects_invalid_paths_locks_and_stop_failures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / 'nulas'
+            release = self.removal_fixture(home)
+            with patch.object(setup, 'add_path') as paths, patch('install_service.uninstall_service') as uninstall:
+                setup.atomic_json(home / 'installation.json', {'current': str(home.parent)})
+                with self.assertRaisesRegex(RuntimeError, 'Current release'):
+                    setup.remove(home)
+                setup.atomic_json(home / 'installation.json', {'current': str(release)})
+                (home / '.update-lock').mkdir()
+                with self.assertRaisesRegex(RuntimeError, 'Another installation'):
+                    setup.remove(home)
+                (home / '.update-lock').rmdir()
+                (home / '.git').mkdir()
+                with self.assertRaisesRegex(RuntimeError, 'development checkout'):
+                    setup.remove(home)
+                (home / '.git').rmdir()
+                if sys.platform == 'linux':
+                    uninstall.side_effect = RuntimeError('stop failed')
+                    with self.assertRaisesRegex(RuntimeError, 'stop failed'):
+                        setup.remove(home)
+                    self.assertTrue((home / 'installation.json').exists())
+                    self.assertTrue(release.exists())
+                paths.assert_not_called()
+
+    def test_remove_rejects_symlinks_and_data_overrides_inside_software(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / 'nulas'
+            release = self.removal_fixture(home)
+            outside = Path(directory) / 'outside'
+            outside.mkdir()
+            (home / 'tools/keep').unlink()
+            (home / 'tools').rmdir()
+            (home / 'tools').symlink_to(outside, target_is_directory=True)
+            with patch.object(setup, 'add_path') as paths, patch('install_service.uninstall_service') as uninstall:
+                with self.assertRaisesRegex(RuntimeError, 'unexpected installation path'):
+                    setup.remove(home)
+                (home / 'tools').unlink()
+                for key in ('NULAS_DATA_DIR', 'NULAS_CORE_DIR'):
+                    with patch.dict(os.environ, {key: str(release / 'data')}):
+                        with self.assertRaisesRegex(RuntimeError, key):
+                            setup.remove(home)
+                paths.assert_not_called()
+                uninstall.assert_not_called()
+                self.assertTrue(release.exists())
+                self.assertTrue(outside.exists())
+
+    def test_remove_deletion_failure_retains_metadata_and_reports_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / 'nulas'
+            self.removal_fixture(home)
+            with patch.object(setup, 'add_path'), patch('install_service.uninstall_service'), \
+                    patch.object(setup.shutil, 'rmtree', side_effect=OSError('file in use')), \
+                    patch('builtins.print') as output:
+                with self.assertRaisesRegex(OSError, 'file in use'):
+                    setup.remove(home)
+                self.assertTrue((home / 'installation.json').exists())
+                self.assertFalse((home / '.update-lock').exists())
+                output.assert_not_called()
+
+    def test_launcher_remove_bypasses_running_binary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            release = home / 'releases/current'
+            (release / 'scripts').mkdir(parents=True)
+            (release / 'scripts/setup.py').write_text('import sys; print(sys.argv[1:])')
+            setup.atomic_json(home / 'installation.json', {'current': str(release),
+                'tools': {key: sys.executable for key in ('git', 'go', 'node', 'python')}})
+            setup.launchers(home)
+            output = subprocess.check_output([sys.executable, str(home / 'bin/launcher.py'), 'remove'], text=True)
+            self.assertIn("'remove', '--home', " + repr(str(home)), output)
+
 
 if __name__ == '__main__':
     unittest.main()

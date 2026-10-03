@@ -21,7 +21,7 @@ func execCLI(ctx context.Context, stdout, stderr io.Writer, name string, args ..
 	return cmd.Run()
 }
 
-const cliUsage = `Usage: nulas [install|status|start|stop|restart|run|update|config [KEY [PORT]]]
+const cliUsage = `Usage: nulas [install|uninstall|remove|status|start|stop|restart|run|update|config [KEY [PORT]]]
 
   config [KEY [PORT]] Show all ports, or show/save one (1–65535; restart to apply).
                      Keys: port (web/API), ssr-port, dev-port.
@@ -32,6 +32,9 @@ const cliUsage = `Usage: nulas [install|status|start|stop|restart|run|update|con
            --check, --auto on|off|status, --watch
   install  Install the Linux user service for both frontend and backend
            (does not start it or enable boot startup; requires Python 3).
+  uninstall Stop, disable and remove the Linux user service (requires Python 3).
+  remove   Remove quick-installed software and CLI PATH entries; preserve data,
+           core runtime and user configuration. Stop foreground servers first.
   status   Show the combined service's systemd status.
   start    Start both servers.
   stop     Stop both servers.
@@ -61,7 +64,11 @@ func runCLI(args []string, stdout, stderr io.Writer, run cliRunner, executable f
 	if len(args) > 0 && args[0] == "config" {
 		return runPortConfig(args[1:], stdout, stderr)
 	}
-	if len(args) > 0 && (args[0] == "update" || args[0] == "run") {
+	if len(args) > 0 && (args[0] == "update" || args[0] == "run" || args[0] == "remove") {
+		if args[0] == "remove" && len(args) != 1 {
+			fmt.Fprint(stderr, cliUsage)
+			return 2
+		}
 		binary, err := executable()
 		if err != nil {
 			return cliExit(err, stderr)
@@ -72,7 +79,10 @@ func runCLI(args []string, stdout, stderr io.Writer, run cliRunner, executable f
 		}
 		home := os.Getenv("NULAS_INSTALL_HOME")
 		if home == "" {
-			return cliExit(errors.New("run/update require a quick installation; use scripts/install.sh or scripts/install.ps1"), stderr)
+			return cliExit(errors.New("run/update/remove require a quick installation; use scripts/install.sh or scripts/install.ps1"), stderr)
+		}
+		if args[0] == "remove" && runtime.GOOS == "windows" {
+			return cliExit(errors.New("use the installed nulas.cmd launcher for removal; run nulas update once to refresh an older launcher"), stderr)
 		}
 		script := filepath.Join(filepath.Dir(filepath.Dir(binary)), "scripts", "setup.py")
 		python := env("NULAS_PYTHON", "python3")
@@ -82,23 +92,23 @@ func runCLI(args []string, stdout, stderr io.Writer, run cliRunner, executable f
 		forward := append([]string{script}, args...)
 		forward = append(forward, "--home", home)
 		ctx := context.Background()
-		if args[0] == "update" && !strings.Contains(strings.Join(args, " "), "--watch") {
+		if (args[0] == "update" || args[0] == "remove") && !strings.Contains(strings.Join(args, " "), "--watch") {
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithTimeout(ctx, 2*time.Hour)
 			defer cancel()
 		}
 		return cliExit(run(ctx, stdout, stderr, python, forward...), stderr)
 	}
-	if len(args) != 1 || (args[0] != "install" && args[0] != "status" && args[0] != "start" && args[0] != "stop" && args[0] != "restart") {
+	if len(args) != 1 || (args[0] != "install" && args[0] != "uninstall" && args[0] != "status" && args[0] != "start" && args[0] != "stop" && args[0] != "restart") {
 		fmt.Fprint(stderr, cliUsage)
 		return 2
 	}
 	if runtime.GOOS != "linux" {
 		return cliExit(errors.New("service commands require Linux and user systemd"), stderr)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	if args[0] == "install" {
+	if args[0] == "install" || args[0] == "uninstall" {
 		binary, err := executable()
 		if err != nil {
 			return cliExit(err, stderr)
@@ -111,7 +121,11 @@ func runCLI(args []string, stdout, stderr io.Writer, run cliRunner, executable f
 		if _, err := os.Stat(installer); err != nil {
 			return cliExit(fmt.Errorf("keep the executable in the project's bin directory and run scripts/build.sh first: %w", err), stderr)
 		}
-		return cliExit(run(ctx, stdout, stderr, env("NULAS_PYTHON", "python3"), installer), stderr)
+		forward := []string{installer}
+		if args[0] == "uninstall" {
+			forward = append(forward, "--uninstall")
+		}
+		return cliExit(run(ctx, stdout, stderr, env("NULAS_PYTHON", "python3"), forward...), stderr)
 	}
 	// Refuse to operate on unrelated same-name services, including system units.
 	var description strings.Builder

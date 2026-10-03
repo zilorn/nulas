@@ -60,6 +60,17 @@ nulas start
 
 打开 [http://127.0.0.1:4669](http://127.0.0.1:4669)。快速安装的 Linux 服务使用稳定启动器，重启时读取最新已构建版本。Windows / macOS 暂不提供后台服务安装，使用 `nulas run`。
 
+### 卸载
+
+```sh
+nulas uninstall                # Linux：停止服务、关闭自启并移除用户级服务
+nulas remove                   # 卸载快速安装的软件；Linux 同时卸载对应服务
+```
+
+`uninstall` 保留软件和所有配置，之后可用 `nulas install` 重新安装服务。`remove` 支持 Linux / macOS / Windows，仅删除快速安装目录中的 `source/`、`releases/`、`tools/`、`bin/` 和 `installation.json`，清理安装器添加的当前用户 PATH 配置；保留 `data/`、`runtime/`、用户端口配置、`service.env` 及其他文件，不卸载共享系统依赖。重新打开终端使 PATH 更新生效。Windows 请使用安装器生成的 `nulas.cmd`；旧启动器提示需要刷新时执行一次 `nulas update` 后重试。
+
+卸载前先用 Ctrl+C 停止前台的 `nulas run` 和 `nulas update --watch`，并在页面关闭已启用的系统代理 / TUN。卸载不会修改系统网络设置。服务停用失败或软件文件删除失败时返回非零退出码，不会报告卸载成功。拒绝删除开发仓库、其他安装的服务、符号链接软件目录，以及正在安装 / 更新的目录；手工构建的开发仓库只支持 `uninstall`，软件文件由用户自行管理。保留的数据可供重新安装使用，彻底清理数据需另行备份并手动删除。
+
 ### 更新发现与自动更新
 
 ```sh
@@ -197,6 +208,8 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 | `nulas update --auto on/off/status` | 开启、关闭或查看自动更新偏好 |
 | `nulas update --watch` | 独立前台自动更新调度器 |
 | `nulas install` | 安装 / 更新 Linux 用户级组合服务，不启动、不开启自启（需要 Python 3） |
+| `nulas uninstall` | 停止、禁用并移除 Linux 用户级服务，保留软件与数据 |
+| `nulas remove` | 卸载快速安装的软件及 PATH 配置，保留用户数据、内核和配置 |
 | `nulas status` | 查看服务状态与近期日志；未运行时返回非零退出码 |
 | `nulas start` / `stop` / `restart` | 启动、停止、重启前后端 |
 | `nulas config [port\|ssr-port\|dev-port] [PORT]` | 显示全部端口，或查询 / 保存单项，重启后生效 |

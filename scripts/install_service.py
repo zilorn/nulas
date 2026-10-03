@@ -39,9 +39,43 @@ def service_text(root, node, installation=None):
             + "\n[Install]\nWantedBy=default.target\n")
 
 
+def uninstall_service(installation=None):
+    """Remove only the installer-owned user unit; fail before deleting on stop errors."""
+    if sys.platform != "linux" or os.geteuid() == 0:
+        raise RuntimeError("Uninstall as the ordinary Linux user who runs Nulas, not root.")
+    config = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+    path = config / "systemd/user/nulas.service"
+    if path.is_symlink():
+        raise RuntimeError("Refusing to remove a symlinked service.")
+    if not path.exists():
+        print("Nulas user service is not installed.")
+        return
+    content = path.read_text()
+    if not content.startswith(MARKER):
+        raise RuntimeError("Refusing to remove an existing service not created by Nulas.")
+    if installation:
+        launcher = " " + unit_quote(str(installation / "bin/launcher.py")) + " run"
+        if not any(line.startswith("ExecStart=:") and line.endswith(launcher) for line in content.splitlines()):
+            raise RuntimeError("The Nulas user service belongs to a different installation; run nulas uninstall explicitly first.")
+    fragment = subprocess.check_output(
+        ["systemctl", "--user", "show", "nulas.service", "--property=FragmentPath", "--value"],
+        text=True, timeout=10).strip()
+    if not fragment or Path(fragment).resolve() != path.resolve():
+        raise RuntimeError("Refusing to operate on a different loaded Nulas service; check your user systemd session.")
+    subprocess.run(["systemctl", "--user", "disable", "--now", "nulas.service"], check=True, timeout=35)
+    path.unlink()
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, timeout=10)
+    print(f"Uninstalled {path}. User configuration and data were preserved.")
+
+
 def main():
     if sys.platform != "linux" or os.geteuid() == 0:
         raise SystemExit("Install as the ordinary Linux user who runs Nulas, not root.")
+    if sys.argv[1:] == ["--uninstall"]:
+        uninstall_service()
+        return
+    if sys.argv[1:]:
+        raise SystemExit("Usage: install_service.py [--uninstall]")
     root = Path(__file__).resolve().parent.parent
     node = shutil.which("node")
     if not node or int(subprocess.check_output([node, "-p", "process.versions.node.split('.')[0]"], text=True)) < 24:

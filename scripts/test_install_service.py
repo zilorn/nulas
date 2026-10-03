@@ -4,7 +4,9 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
-from install_service import service_text, unit_quote, working_directory
+from unittest.mock import patch
+import install_service
+from install_service import service_text, unit_quote, working_directory, uninstall_service
 
 
 class ServiceTests(unittest.TestCase):
@@ -46,6 +48,58 @@ class ServiceTests(unittest.TestCase):
             self.assertIn('"' + str(home / 'bin/launcher.py') + '" run', unit)
             self.assertNotIn('scripts/start.sh', unit)
             self.assertIn('KillMode=control-group', unit)
+
+    def test_uninstall_checks_ownership_and_stops_before_deleting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory)
+            unit = config / 'systemd/user/nulas.service'
+            unit.parent.mkdir(parents=True)
+            with patch.dict(install_service.os.environ, {'XDG_CONFIG_HOME': str(config)}), \
+                    patch.object(install_service.sys, 'platform', 'linux'), \
+                    patch.object(install_service.os, 'geteuid', return_value=1000), \
+                    patch.object(install_service.subprocess, 'check_output', return_value=str(unit)) as query, \
+                    patch.object(install_service.subprocess, 'run') as run:
+                uninstall_service()  # absent unit: no system commands
+                run.assert_not_called()
+                query.assert_not_called()
+                unit.write_text('[Unit]\nDescription=Other\n')
+                with self.assertRaisesRegex(RuntimeError, 'not created by Nulas'):
+                    uninstall_service()
+                query.assert_not_called()
+                unit.write_text(service_text(Path('/srv/nulas'), '/usr/bin/node'))
+                with patch.object(install_service.subprocess, 'check_output', return_value='/other/nulas.service'):
+                    with self.assertRaisesRegex(RuntimeError, 'different loaded'):
+                        uninstall_service()
+                run.assert_not_called()
+                run.side_effect = subprocess.CalledProcessError(1, 'systemctl')
+                with self.assertRaises(subprocess.CalledProcessError):
+                    uninstall_service()
+                self.assertTrue(unit.exists())
+                run.reset_mock()
+                run.side_effect = None
+                def verify(args, **kwargs):
+                    self.assertEqual(unit.exists(), args[2] == 'disable')
+                run.side_effect = verify
+                uninstall_service()
+                self.assertFalse(unit.exists())
+                self.assertEqual([c.args[0] for c in run.call_args_list], [
+                    ['systemctl', '--user', 'disable', '--now', 'nulas.service'],
+                    ['systemctl', '--user', 'daemon-reload']])
+
+    def test_remove_refuses_service_from_another_installation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory)
+            unit = config / 'systemd/user/nulas.service'
+            unit.parent.mkdir(parents=True)
+            unit.write_text(service_text(Path('/srv/nulas'), '/usr/bin/node'))
+            with patch.dict(install_service.os.environ, {'XDG_CONFIG_HOME': str(config)}), \
+                    patch.object(install_service.sys, 'platform', 'linux'), \
+                    patch.object(install_service.os, 'geteuid', return_value=1000), \
+                    patch.object(install_service.subprocess, 'run') as run:
+                with self.assertRaisesRegex(RuntimeError, 'different installation'):
+                    uninstall_service(Path('/another/install'))
+                run.assert_not_called()
+                self.assertTrue(unit.exists())
 
 
 if __name__ == '__main__':

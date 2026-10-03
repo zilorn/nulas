@@ -259,6 +259,8 @@ def update(home, check=False):
             if metadata.get('error'):
                 metadata['error'] = None
                 atomic_json(home / 'installation.json', metadata)
+            if not check:
+                launchers(home)
             print('Nulas is up to date.', flush=True)
             return
         # Reject remote history rewrites instead of silently downgrading/diverging.
@@ -266,6 +268,7 @@ def update(home, check=False):
         print('Update available.', flush=True)
         if not check:
             stage(home, metadata, latest)
+            launchers(home)
             print('Update installed. Restart Nulas to use the new version.', flush=True)
 
 
@@ -342,7 +345,7 @@ def run_servers(home):
                 process.wait()
 
 
-def add_path(home, user_home=None):
+def add_path(home, user_home=None, remove=False):
     user_home = Path(user_home or Path.home())
     bin_dir = str(home / 'bin')
     if os.name == 'nt':
@@ -353,7 +356,11 @@ def add_path(home, user_home=None):
                 existing, kind = winreg.QueryValueEx(key, 'Path')
             except FileNotFoundError:
                 existing, kind = '', winreg.REG_EXPAND_SZ
-            if bin_dir.lower() not in [p.lower() for p in existing.split(';')]:
+            if remove:
+                remaining = ';'.join(p for p in existing.split(';') if os.path.normcase(p) != os.path.normcase(bin_dir))
+                if remaining != existing:
+                    winreg.SetValueEx(key, 'Path', 0, kind, remaining)
+            elif bin_dir.lower() not in [p.lower() for p in existing.split(';')]:
                 winreg.SetValueEx(key, 'Path', 0, kind, existing + (';' if existing else '') + bin_dir)
         import ctypes
         result = ctypes.c_size_t()
@@ -369,20 +376,49 @@ def add_path(home, user_home=None):
             paths.append(user_home / filename)
             break
     for path in paths:
+        if remove and not path.exists():
+            continue
         path.parent.mkdir(parents=True, exist_ok=True)
         existing = path.read_text() if path.exists() else ''
-        if line not in existing:
+        if remove:
+            if line in existing:
+                path.write_text(existing.replace(line, ''))
+        elif line not in existing:
             with path.open('a') as stream:
                 stream.write(line)
     fish = Path(os.environ.get('XDG_CONFIG_HOME', str(user_home / '.config'))) / 'fish/conf.d/nulas.fish'
+    if remove and not fish.exists():
+        return
     fish.parent.mkdir(parents=True, exist_ok=True)
     # Single-quoted fish strings support escaped backslash and quote.
     fish_path = "'" + bin_dir.replace('\\', '\\\\').replace("'", "\\'") + "'"
     fish_line = '\n# Nulas CLI\nfish_add_path --path ' + fish_path + '\n'
     existing = fish.read_text() if fish.exists() else ''
-    if fish_line not in existing:
+    if remove:
+        if fish_line in existing:
+            remaining = existing.replace(fish_line, '')
+            if remaining:
+                fish.write_text(remaining)
+            else:
+                fish.unlink()
+    elif fish_line not in existing:
         with fish.open('a') as stream:
             stream.write(fish_line)
+
+
+def launcher_file(path, content, executable=False):
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix='.launcher-')
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if executable:
+            os.chmod(name, 0o755)
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
 
 
 def launchers(home):
@@ -390,7 +426,7 @@ def launchers(home):
     directory.mkdir(exist_ok=True)
     launcher = directory / 'launcher.py'
     # This stable dispatcher remains outside release trees; updates are an atomic pointer switch.
-    launcher.write_text('''import json, os, pathlib, subprocess, sys
+    launcher_file(launcher, '''import json, os, pathlib, subprocess, sys
 home = pathlib.Path(__file__).resolve().parent.parent
 metadata = json.loads((home / 'installation.json').read_text(encoding='utf-8'))
 os.environ['NULAS_INSTALL_HOME'] = str(home)
@@ -401,7 +437,7 @@ os.environ.setdefault('NULAS_DATA_DIR', str(home / 'data'))
 os.environ.setdefault('NULAS_CORE_DIR', str(home / 'runtime/core'))
 root = pathlib.Path(metadata['current'])
 args = sys.argv[1:]
-if args and args[0] in ('run', 'update'):
+if args and args[0] in ('run', 'update', 'remove'):
     cmd = [metadata['tools']['python'], str(root / 'scripts/setup.py'), *args, '--home', str(home)]
 else:
     cmd = [str(root / 'bin' / ('nulas.exe' if os.name == 'nt' else 'nulas')), *args]
@@ -409,7 +445,7 @@ try:
     sys.exit(subprocess.call(cmd))
 except KeyboardInterrupt:
     sys.exit(130)
-''', encoding='utf-8')
+'''.encode('utf-8'))
     python = sys.executable
     if os.name == 'nt':
         if any(c in python + str(launcher) for c in '%\r\n'):
@@ -417,15 +453,49 @@ except KeyboardInterrupt:
         # Decode UTF-8 paths correctly even for non-ASCII Windows user names.
         batch = ('@echo off\r\nsetlocal\r\n'
                  'for /f "tokens=2 delims=:" %%C in (\'chcp\') do set "_nulas_cp=%%C"\r\n'
-                 'chcp 65001 >nul\r\n'
+                 'chcp 65001 >nul\r\n(\r\n'
                  + f'"{python}" "{launcher}" %*\r\n'
-                 + 'set "_nulas_status=%errorlevel%"\r\n'
-                 'chcp %_nulas_cp% >nul\r\nexit /b %_nulas_status%\r\n')
-        (directory / 'nulas.cmd').write_bytes(batch.encode('utf-8'))
+                 + 'call set "_nulas_status=%%errorlevel%%"\r\n'
+                 'chcp %_nulas_cp% >nul\r\ncall exit /b %%_nulas_status%%\r\n)\r\n')
+        launcher_file(directory / 'nulas.cmd', batch.encode('utf-8'))
     else:
         entry = directory / 'nulas'
-        entry.write_text('#!/bin/sh\nexec ' + shlex.quote(python) + ' ' + shlex.quote(str(launcher)) + ' "$@"\n')
-        entry.chmod(0o755)
+        launcher_file(entry, ('#!/bin/sh\nexec ' + shlex.quote(python) + ' ' + shlex.quote(str(launcher)) + ' "$@"\n').encode('utf-8'), executable=True)
+
+
+def remove(home):
+    """Remove managed software only, leaving data/runtime/configuration recoverable."""
+    if os.name != 'nt' and os.geteuid() == 0:
+        raise RuntimeError('Remove as your ordinary user, not root')
+    home = Path(home).resolve()
+    if home == Path(home.anchor) or home == Path.home().resolve() or (home / '.git').exists():
+        raise RuntimeError('Refusing to remove software from a filesystem root, user home or development checkout')
+    metadata = load(home)
+    current = Path(metadata['current']).resolve()
+    releases = home / 'releases'
+    if releases.is_symlink() or current.parent != releases:
+        raise RuntimeError('Current release is not inside this managed installation; refusing removal')
+    directories = [home / name for name in ('source', 'releases', 'tools', 'bin')]
+    for path in directories:
+        if path.is_symlink() or (path.exists() and not path.is_dir()):
+            raise RuntimeError('Refusing to remove unexpected installation path: ' + str(path))
+    for key in ('NULAS_DATA_DIR', 'NULAS_CORE_DIR'):
+        if os.environ.get(key):
+            protected = Path(os.environ[key]).resolve()
+            if any(protected == path or path in protected.parents for path in directories):
+                raise RuntimeError(key + ' is inside software scheduled for removal; move it first')
+    # Keep the lock until removal finishes, so updates cannot rebuild deleted software.
+    with locked(home):
+        if sys.platform == 'linux':
+            from install_service import uninstall_service
+            uninstall_service(home)
+        add_path(home, remove=True)
+        # Delete metadata last: any deletion error stays visible and retains recovery context.
+        for path in directories:
+            if path.exists():
+                shutil.rmtree(path)
+        (home / 'installation.json').unlink()
+    print(f'Removed Nulas software from {home}. Data, core runtime and user configuration were preserved. Reopen your terminal.')
 
 
 def install(home, repository, branch):
@@ -450,7 +520,7 @@ def main():
     if sys.version_info < (3, 10):
         raise RuntimeError('Python 3.10+ is required')
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['install', 'update', 'run'])
+    parser.add_argument('action', choices=['install', 'update', 'run', 'remove'])
     parser.add_argument('--home', type=Path, default=Path(os.environ.get('NULAS_INSTALL_HOME', str(Path.home() / '.local/share/nulas'))))
     parser.add_argument('--repository', default=REPOSITORY)
     parser.add_argument('--branch', default='main')
@@ -463,6 +533,8 @@ def main():
         parser.error('update options require the update command')
     if args.action == 'install':
         install(home, args.repository, args.branch)
+    elif args.action == 'remove':
+        remove(home)
     elif args.action == 'run':
         run_servers(home)
     elif sum(bool(v) for v in (args.auto, args.watch, args.check)) > 1:
