@@ -24,7 +24,15 @@ Windows 使用 `mihomo.exe`。内核和 Nulas 后端分别运行；长期运行�
 
 ## 本地启动
 
-需要 Node.js 22+、pnpm 和 Go 1.23+。两个终端分别运行：
+需要 Node.js 22+、pnpm 和 Go 1.23+。Linux/macOS 上可一键启动（Bash 4.3+；macOS 默认 Bash 版本较旧时需使用新版 Bash）：
+
+```sh
+./scripts/dev.sh
+```
+
+脚本安装锁定的前端依赖，编译并同时启动前后端，按 Ctrl+C 会停止两项服务；任一服务退出也会停止另一项服务。可从任意工作目录调用脚本。开发代理固定使用 `127.0.0.1:8080`，请勿自定义 `NULAS_ADDR`。后端沿用环境变量配置，默认数据仍保存到 `backend/.data`。
+
+也可使用两个终端分别运行：
 
 ```sh
 cd backend
@@ -72,6 +80,21 @@ Mihomo 本身需要启用 `external-controller` 和对应 `secret`。控制接�
 | `MIHOMO_SECRET` | 空 | 内核 API 密钥 |
 
 ## 验证与构建
+
+一键构建（Bash）：
+
+```sh
+./scripts/build.sh
+```
+
+脚本安装锁定依赖，运行前端类型检查，构建静态网页和 Go 后端。产物为 `web/.output/public/` 与 `bin/nulas`，不会下载或启动 Mihomo。构建完成后启动生产服务：
+
+```sh
+cd backend
+../bin/nulas
+```
+
+打开 http://127.0.0.1:8080。以下命令可单独执行验证与构建：
 
 ```sh
 cd backend

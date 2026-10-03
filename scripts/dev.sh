@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Separate process groups let cleanup stop pnpm and all of its descendants.
+set -m
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
+  echo "开发脚本需要 Bash 4.3+。" >&2
+  exit 1
+fi
+for tool in node pnpm go; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "缺少依赖：$tool（需要 Node.js 22+、pnpm、Go 1.23+）" >&2; exit 1; }
+done
+if [[ "${NULAS_ADDR:-127.0.0.1:8080}" != "127.0.0.1:8080" ]]; then
+  echo "开发代理要求 NULAS_ADDR=127.0.0.1:8080，请取消自定义监听地址。" >&2
+  exit 1
+fi
+
+cd "$ROOT_DIR/web"
+pnpm install --frozen-lockfile
+DEV_DIR="$(mktemp -d "${TMPDIR:-/tmp}/nulas-dev.XXXXXXXX")"
+backend_pid=""
+frontend_pid=""
+cleanup() {
+  trap - EXIT INT TERM
+  for pid in "$backend_pid" "$frontend_pid"; do
+    if [[ -n "$pid" ]]; then
+      kill -TERM -- "-$pid" 2>/dev/null || true
+    fi
+  done
+  for pid in "$backend_pid" "$frontend_pid"; do
+    if [[ -n "$pid" ]]; then
+      wait "$pid" 2>/dev/null || true
+    fi
+  done
+  rm -rf -- "$DEV_DIR"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+cd "$ROOT_DIR/backend"
+go build -o "$DEV_DIR/nulas" .
+"$DEV_DIR/nulas" &
+backend_pid=$!
+cd "$ROOT_DIR/web"
+pnpm dev --port 3000 &
+frontend_pid=$!
+printf '\n开发网页：http://localhost:3000\n后端 API：http://127.0.0.1:8080\n按 Ctrl+C 停止前后端；任一服务退出时会停止另一项服务。\n'
+status=0
+wait -n "$backend_pid" "$frontend_pid" || status=$?
+echo "开发服务已退出（状态码：$status）。" >&2
+exit "$status"
