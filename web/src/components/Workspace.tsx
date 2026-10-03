@@ -20,5 +20,13 @@ export default function Workspace(props: { page: "quick" | "profiles" | "tasks" 
   <a class="nav" classList={{active:props.page==="core"}} href="/core"><SidebarIcon><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></SidebarIcon><span>内核管理</span></a>
   <a class="nav" classList={{active:props.page==="tasks"}} href="/tasks"><SidebarIcon><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></SidebarIcon><span>后台任务</span></a>
   <div class="sidebar-note">为更快的配置而构建<p>SolidStart + Go<br/>Mihomo compatible</p></div>
- </aside><main><header><span>工作空间 / {({quick:"概览",profiles:"配置管理",nodes:"节点管理",tasks:"后台任务",core:"内核管理"})[props.page]}</span><span class="connection" classList={{online:props.online ?? online()}}>● {(props.online ?? online())?"后端已连接":"后端未连接"}</span></header>{props.children}<footer>NULAS / 本地配置工作空间<span>支持完整配置导入和节点选择，自启管理支持 Linux，系统代理仅支持 GNOME 桌面。</span></footer></main></div>;
+ </aside><main><header><span>工作空间 / {({quick:"概览",profiles:"配置管理",nodes:"节点管理",tasks:"后台任务",core:"内核管理"})[props.page]}</span><span class="connection" classList={{online:props.online ?? online()}}>● {(props.online ?? online())?"后端已连接":"后端未连接"}</span></header>{props.children}<footer>
+  <div class="footer-project">NULAS / 本地配置工作空间
+   <div class="footer-meta">
+    <a href="https://github.com/zilorn/nulas" target="_blank" rel="noopener noreferrer" aria-label="Nulas GitHub 仓库（在新标签页打开）">GitHub ↗</a>
+    <span title={__NULAS_BUILD_HASH__ || undefined}>{__NULAS_BUILD_HASH__ ? <>由 <code>{__NULAS_BUILD_HASH__.slice(0, 7)}</code> 构建</> : "构建版本未知"}</span>
+   </div>
+  </div>
+  <span>支持完整配置导入和节点选择，自启管理支持 Linux，系统代理仅支持 GNOME 桌面。</span>
+ </footer></main></div>;
 }

@@ -145,6 +145,8 @@ nulas status                   # 查看组合服务状态
 
 打开 [http://127.0.0.1:4669](http://127.0.0.1:4669)。`nulas stop` / `nulas restart` 同时停止或重启前后端，`nulas --help` 查看命令。可将项目 `bin` 的绝对路径加入 shell 配置的 PATH。服务依赖当前项目路径与构建产物，更新代码后重新执行 `./scripts/build.sh` 与 `nulas restart`；迁移目录或更换 Node 路径后先重新执行 `nulas install`。
 
+所有页面的页脚提供本项目 GitHub 仓库入口，并显示「由 [git hash] 构建」。版本在前端构建时从 Git HEAD 写入，显示前 7 位，悬停可查看完整 hash；无 Git 信息时显示「构建版本未知」。从源码归档构建时，可通过 `NULAS_BUILD_HASH` 环境变量提供对应提交的 hash（7–40 位十六进制字符）。
+
 三个 Nulas 端口均可在 CLI 中自定义，默认 Web/API 为 `4669`、SSR 为 `4668`、开发前端为 `4589`：
 
 生产环境请访问 Web/API 端口。`4668` 是 Go 转发页面请求所用的内部 SSR 端口，直接打开它虽然能看到页面，但无法调用 API；仅运行 `pnpm start` 也不会启动 Go 后端。`nulas start` / `nulas restart` 成功后会显示当前 CLI 配置的浏览器入口和 SSR 端口说明；若 `service.env` 覆盖了端口，以服务启动日志为准。若出现“状态更新失败”、API 返回 HTML 或“SSR 内部端口”提示，请通过 `nulas config port` 查询入口端口，并用 `nulas start`、`nulas run` 或 `scripts/start.sh` 启动前后端。

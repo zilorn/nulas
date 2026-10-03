@@ -25,6 +25,7 @@
 .core-overview{margin-bottom:24px}
 
 /* Keep sidebar artwork aligned independently of the text font. */
+.footer-project{flex-shrink:0}.footer-meta{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:6px}.footer-meta a{color:#20785c}.footer-meta a:hover{text-decoration:underline}.footer-meta code{font-size:inherit}.footer-meta span{display:inline}
 .nav{display:flex;align-items:center;gap:12px}
 .nav-icon{width:20px;height:20px;flex-shrink:0;display:block}
 .brand-icon{width:32px;height:32px;flex-shrink:0;display:block}
