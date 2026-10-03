@@ -27,10 +27,20 @@ type Profile struct {
 	Created time.Time `json:"created"`
 }
 
+type importedConfig struct {
+	Config
+	Name string
+}
+
+func importConfig(content string) (Config, error) {
+	imported, err := importNamedConfig(content)
+	return imported.Config, err
+}
+
 // Imports deliberately support only the starter's core settings. Rejecting
 // additional fields prevents silently discarding rules, proxies or credentials.
-func importConfig(content string) (Config, error) {
-	c := Config{7890, "rule", false, false, "info"}
+func importNamedConfig(content string) (importedConfig, error) {
+	c := importedConfig{Config: Config{7890, "rule", false, false, "info"}}
 	content = strings.TrimSpace(strings.TrimPrefix(content, "\ufeff"))
 	if len(content) > maxImportBytes {
 		return c, errors.New("导入内容不能超过 6 KB")
@@ -96,7 +106,7 @@ func importConfig(content string) (Config, error) {
 				}
 			}
 			switch key {
-			case "mode", "log-level":
+			case "name", "mode", "log-level":
 				if strings.HasPrefix(value, "\"") {
 					var v string
 					if json.Unmarshal([]byte(value), &v) != nil {
@@ -116,7 +126,7 @@ func importConfig(content string) (Config, error) {
 			}
 		}
 	}
-	if len(fields) == 0 {
+	if len(fields) == 0 || (len(fields) == 1 && fields["name"] != nil) {
 		return c, errors.New("配置必须包含至少一个核心参数")
 	}
 	for key, value := range fields {
@@ -125,6 +135,8 @@ func importConfig(content string) (Config, error) {
 		}
 		var err error
 		switch key {
+		case "name":
+			err = json.Unmarshal(value, &c.Name)
 		case "mixed-port":
 			err = json.Unmarshal(value, &c.Port)
 		case "mode":
@@ -136,13 +148,17 @@ func importConfig(content string) (Config, error) {
 		case "log-level":
 			err = json.Unmarshal(value, &c.Log)
 		default:
-			return c, fmt.Errorf("不支持字段 %s；仅支持 mixed-port、mode、allow-lan、ipv6、log-level", strconv.Quote(key))
+			return c, fmt.Errorf("不支持字段 %s；仅支持 name、mixed-port、mode、allow-lan、ipv6、log-level", strconv.Quote(key))
 		}
 		if err != nil {
 			return c, fmt.Errorf("字段 %s 的类型不正确", key)
 		}
 	}
-	return c, validate(c)
+	c.Name = strings.TrimSpace(c.Name)
+	if len([]rune(c.Name)) > 60 {
+		return c, errors.New("文件内的配置名称不能超过 60 个字符")
+	}
+	return c, validate(c.Config)
 }
 
 // URLs may contain tokens: never persist them or include them in errors.
@@ -154,16 +170,16 @@ func validateImportURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-func fetchImportConfig(ctx context.Context, raw string) (Config, error) {
+func fetchImportConfig(ctx context.Context, raw string) (importedConfig, error) {
 	u, err := validateImportURL(strings.TrimSpace(raw))
 	if err != nil {
-		return Config{}, err
+		return importedConfig{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, networkImportTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return Config{}, errors.New("配置地址无效")
+		return importedConfig{}, errors.New("配置地址无效")
 	}
 	req.Header.Set("Accept", "application/yaml, application/json, text/yaml, text/plain")
 	// Separate direct client: no controller credentials or proxy dependency.
@@ -184,23 +200,23 @@ func fetchImportConfig(ctx context.Context, raw string) (Config, error) {
 	}}
 	response, err := client.Do(req)
 	if err != nil {
-		return Config{}, errors.New("配置下载失败，请检查地址、网络或重定向；下载须在 15 秒内完成")
+		return importedConfig{}, errors.New("配置下载失败，请检查地址、网络或重定向；下载须在 15 秒内完成")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return Config{}, fmt.Errorf("配置下载失败：HTTP %d", response.StatusCode)
+		return importedConfig{}, fmt.Errorf("配置下载失败：HTTP %d", response.StatusCode)
 	}
 	if response.ContentLength > maxImportBytes {
-		return Config{}, errors.New("导入内容不能超过 6 KB")
+		return importedConfig{}, errors.New("导入内容不能超过 6 KB")
 	}
 	content, err := io.ReadAll(io.LimitReader(response.Body, maxImportBytes+1))
 	if err != nil {
-		return Config{}, errors.New("配置下载未完成，请重试")
+		return importedConfig{}, errors.New("配置下载未完成，请重试")
 	}
 	if len(content) > maxImportBytes {
-		return Config{}, errors.New("导入内容不能超过 6 KB")
+		return importedConfig{}, errors.New("导入内容不能超过 6 KB")
 	}
-	return importConfig(string(content))
+	return importNamedConfig(string(content))
 }
 
 func (a *App) profileRoutes(mux *http.ServeMux) {
@@ -225,7 +241,7 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 			return
 		}
 		body.Name = strings.TrimSpace(body.Name)
-		if body.Name == "" || len([]rune(body.Name)) > 60 {
+		if (body.Name == "" && body.URL == nil) || len([]rune(body.Name)) > 60 {
 			fail(w, 400, errors.New("配置名称须为 1–60 个字符"))
 			return
 		}
@@ -247,10 +263,18 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 		source := "created"
 		if body.URL != nil {
 			var err error
-			c, err = fetchImportConfig(r.Context(), *body.URL)
+			var imported importedConfig
+			imported, err = fetchImportConfig(r.Context(), *body.URL)
+			c = imported.Config
 			if err != nil {
 				fail(w, 400, err)
 				return
+			}
+			if body.Name == "" {
+				body.Name = imported.Name
+				if body.Name == "" {
+					body.Name = "网络导入配置"
+				}
 			}
 			source = "network"
 		} else if body.Content != nil {

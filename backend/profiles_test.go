@@ -199,3 +199,60 @@ func TestNetworkImport(t *testing.T) {
 		t.Fatal("cancellation or error redaction failed")
 	}
 }
+
+func TestNetworkImportOptionalName(t *testing.T) {
+	for _, tc := range []struct {
+		label, content, name, want string
+		status                     int
+	}{
+		{"yaml name", "name: '  文件名称  '\nmode: direct", "", "文件名称", 201},
+		{"json name", `{"name":"JSON 名称","mode":"global"}`, "", "JSON 名称", 201},
+		{"manual override", "name: 文件名称\nmode: rule", " 手动名称 ", "手动名称", 201},
+		{"fallback", "mode: rule", "", "网络导入配置", 201},
+		{"blank names", "name: '  '\nmode: rule", "  ", "网络导入配置", 201},
+		{"invalid name type", `{"name":123,"mode":"rule"}`, "", "", 400},
+		{"null name", `{"name":null,"mode":"rule"}`, "", "", 400},
+		{"long embedded name", "name: " + strings.Repeat("名", 61) + "\nmode: rule", "", "", 400},
+		{"long manual name", "mode: rule", strings.Repeat("名", 61), "", 400},
+		{"name without settings", "name: 文件名称", "", "", 400},
+		{"duplicate name field", "name: A\nname: B\nmode: rule", "", "", 400},
+		{"unsupported settings", "name: 文件名称\nproxies: []", "", "", 400},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, tc.content)
+			}))
+			defer server.Close()
+			a := testApp(t, "")
+			body := map[string]string{"url": server.URL + "/config?token=private"}
+			if tc.name != "" {
+				body["name"] = tc.name
+			}
+			encoded, _ := json.Marshal(body)
+			w := request(a, "POST", "/api/profiles", string(encoded))
+			if w.Code != tc.status {
+				t.Fatalf("status: %d %s", w.Code, w.Body.String())
+			}
+			if tc.status != 201 {
+				if len(a.state.Profiles) != 0 {
+					t.Fatal("failed import saved a profile")
+				}
+				return
+			}
+			var p Profile
+			if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+				t.Fatal(err)
+			}
+			if p.Name != tc.want || p.Source != "network" {
+				t.Fatalf("profile: %+v", p)
+			}
+			b, err := newApp(a.dir, "", "")
+			if err != nil || len(b.state.Profiles) != 1 || b.state.Profiles[0].Name != tc.want {
+				t.Fatalf("persistence: %v", err)
+			}
+			if duplicate := request(a, "POST", "/api/profiles", string(encoded)); duplicate.Code != 409 {
+				t.Fatalf("duplicate: %d %s", duplicate.Code, duplicate.Body.String())
+			}
+		})
+	}
+}
