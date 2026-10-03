@@ -148,14 +148,7 @@ func decode(w http.ResponseWriter, r *http.Request, v any) error {
 }
 func (a *App) handler() http.Handler {
 	mux := http.NewServeMux()
-	webDir := env("NULAS_WEB_DIR", "../web/.output/public")
-	mux.Handle("/", http.FileServer(http.Dir(webDir)))
-	// SolidStart SPA builds emit one entry page; serve it for known client routes.
-	for _, path := range []string{"/tasks", "/nodes"} {
-		mux.HandleFunc("GET "+path, func(w http.ResponseWriter, r *http.Request) {
-			http.ServeFile(w, r, filepath.Join(webDir, "index.html"))
-		})
-	}
+	mux.Handle("/", frontendHandler())
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, errors.New("unknown API endpoint")) })
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()

@@ -1,0 +1,21 @@
+[Unit]
+Description=Nulas SolidStart SSR frontend
+After=network.target
+
+[Service]
+Type=simple
+User=nulas
+Group=nulas
+WorkingDirectory=/opt/nulas/web
+ExecStart=/usr/bin/node /opt/nulas/web/.output/server/index.mjs
+Environment=NITRO_HOST=127.0.0.1
+Environment=NITRO_PORT=3001
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

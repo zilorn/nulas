@@ -9,8 +9,12 @@ if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) ))
   exit 1
 fi
 for tool in node pnpm go; do
-  command -v "$tool" >/dev/null 2>&1 || { echo "缺少依赖：$tool（需要 Node.js 22+、pnpm、Go 1.23+）" >&2; exit 1; }
+  command -v "$tool" >/dev/null 2>&1 || { echo "缺少依赖：$tool（需要 Node.js 24+、pnpm、Go 1.23+）" >&2; exit 1; }
 done
+if (( $(node -p "process.versions.node.split('.')[0]") < 24 )); then
+  echo "需要 Node.js 24+。" >&2
+  exit 1
+fi
 if [[ "${NULAS_ADDR:-127.0.0.1:8080}" != "127.0.0.1:8080" ]]; then
   echo "开发代理要求 NULAS_ADDR=127.0.0.1:8080，请取消自定义监听地址。" >&2
   exit 1

@@ -3,19 +3,25 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vinxi dev",
-    "build": "vinxi build",
-    "typecheck": "tsc --noEmit"
+    "dev": "vite dev",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "start": "NITRO_HOST=127.0.0.1 NITRO_PORT=3001 node .output/server/index.mjs"
   },
   "dependencies": {
-    "@solidjs/start": "^1.1.0",
-    "@solidjs/router": "^0.15.0",
-    "solid-js": "^1.9.0",
-    "vinxi": "^0.5.0"
+    "@solidjs/router": "^0.16.3",
+    "@solidjs/start": "^2.0.5",
+    "solid-js": "^1.9.0"
   },
   "devDependencies": {
+    "@types/node": "^24.19.1",
+    "nitro": "3.0.260903-beta",
     "typescript": "^5.7.0",
-    "@types/node": "^22.0.0"
+    "vite": "8.3.2"
   },
-  "packageManager": "pnpm@11.22.0"
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24"
+  }
 }

@@ -1,6 +1,6 @@
 # Nulas
 
-基于 [MetaCubeX/mihomo · Meta](https://github.com/MetaCubeX/mihomo/tree/Meta) 的网页快速配置面板。使用 **SolidStart + SolidJS + TypeScript** 前端与 **Go** 后端，通过 Mihomo REST API 管理核心运行参数。当前为可运行的基础框架，未复制上游源码，不包含内核二进制。
+基于 [MetaCubeX/mihomo · Meta](https://github.com/MetaCubeX/mihomo/tree/Meta) 的网页快速配置面板。使用 **Vite + SolidStart 2（SSR）+ SolidJS + TypeScript** 前端与 **Go** 后端，通过 Mihomo REST API 管理核心运行参数。当前为可运行的基础框架，未复制上游源码，不包含内核二进制。
 
 ## 按需下载内核
 
@@ -24,7 +24,7 @@ Windows 使用 `mihomo.exe`。Nulas 后端默认自动安装并启动本地内�
 
 ## 本地启动
 
-需要 Node.js 22+、pnpm 和 Go 1.23+。Linux/macOS 上可一键启动（Bash 4.3+；macOS 默认 Bash 版本较旧时需使用新版 Bash）：
+需要 Node.js 24+、pnpm 和 Go 1.23+。Linux/macOS 上可一键启动（Bash 4.3+；macOS 默认 Bash 版本较旧时需使用新版 Bash）：
 
 ```sh
 ./scripts/dev.sh
@@ -77,7 +77,8 @@ Mihomo 本身需要启用 `external-controller` 和对应 `secret`。外部控�
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | `NULAS_ADDR` | `127.0.0.1:8080` | 后端监听地址 |
-| `NULAS_WEB_DIR` | `../web/.output/public` | SolidStart 构建产物路径 |
+| `NULAS_SSR_URL` | `http://127.0.0.1:3001` | Go 转发页面请求的本机 SSR 服务地址（仅支持 HTTP 回环 IP） |
+| `NULAS_WEB_DIR` | 空 | 显式启用旧版静态网页托管；不能用于 SSR 构建 |
 | `NULAS_DATA_DIR` | `.data`（相对工作目录） | 配置、任务和生成文件 |
 | `MIHOMO_CONTROLLER` | 空 | 内核控制 API，例如 http://127.0.0.1:9090 |
 | `MIHOMO_SECRET` | 空 | 内核 API 密钥 |
@@ -90,12 +91,13 @@ Mihomo 本身需要启用 `external-controller` 和对应 `secret`。外部控�
 ./scripts/build.sh
 ```
 
-脚本安装锁定依赖，运行前端类型检查，构建静态网页和 Go 后端。产物为 `web/.output/public/` 与 `bin/nulas`，不会下载或启动 Mihomo。构建完成后启动生产服务：
+脚本安装锁定依赖，运行前端类型检查，构建客户端资源、SSR 服务和 Go 后端。产物为 `web/.output/` 与 `bin/nulas`，不会下载或启动 Mihomo。构建完成后启动生产服务（Bash 4.3+）：
 
 ```sh
-cd backend
-../bin/nulas
+./scripts/start.sh
 ```
+
+脚本同时启动 Go 与 Node SSR 服务。Node 固定绑定 `127.0.0.1:3001`，Go 默认绑定 `127.0.0.1:8080`；任一进程退出都会停止另一项服务，Ctrl+C 同时停止两者。旧部署须移除 `NULAS_WEB_DIR`。
 
 打开 http://127.0.0.1:8080。以下命令可单独执行验证与构建：
 
@@ -114,9 +116,23 @@ pnpm build
 
 ## 长期后台运行
 
-`deploy/nulas.service` 提供 Linux systemd 后端服务模板。先构建后端，将二进制放在 `/opt/nulas/bin/nulas`，创建专用 `nulas` 用户，并配置 `/etc/nulas.env`（限制为管理员可读）。调整模板中的路径后安装并启用该服务。它会在开机时启动并在异常退出后重启。模板未自动安装，不会修改当前系统服务。
+`deploy/nulas.service` 和 `deploy/nulas-web.service` 分别提供 Linux systemd 后端与 SSR 服务模板。先构建，将二进制放在 `/opt/nulas/bin/nulas`，将整个 `web/.output/` 放在 `/opt/nulas/web/.output/`，安装 Node.js 24+，创建专用 `nulas` 用户，并配置 `/etc/nulas.env`（限制为管理员可读）。检查 Node 可执行文件与其他路径后安装并启用两项服务。模板未自动安装，不会修改当前系统服务。Go 任务 worker 与 Node 独立运行，SSR 服务停止不会取消后台任务。
 
-生产网页由 Go 自行托管，无需 Nginx 或单独的 Node 服务。先运行 `cd web && pnpm build`，再运行 Go 服务，打开 http://127.0.0.1:8080。默认从 `../web/.output/public`（相对后端工作目录）加载网页；部署时通过 `NULAS_WEB_DIR` 指定绝对路径。页面与 API 使用同一端口，后台任务在同一 Go 服务中执行。当前服务仅供本机使用；远程认证和 TLS 尚未实现。
+生产环境使用 Go 作为统一入口：`/api/*` 由 Go 处理，页面、客户端资源及框架请求转发到本机 Node SSR 服务，无需 Nginx。SSR 服务不可用时页面返回明确的 502，API 仍然可用。`NULAS_SSR_URL` 可调整 SSR 地址，必须是 HTTP 回环 IP 地址。`NULAS_WEB_DIR` 仅保留旧版静态产物兼容模式，设置后优先于 SSR；新构建不生成可独立托管的 SPA 入口。
+
+分别启动服务时使用两个终端：
+
+```sh
+cd web
+pnpm start
+```
+
+```sh
+cd backend
+../bin/nulas
+```
+
+打开 http://127.0.0.1:8080。SSR 生成页面结构与表单，浏览器接管后读取配置、节点和任务并更新状态；首次 SSR 不调用安装、应用或节点切换操作。当前服务仅供本机使用；远程认证和 TLS 尚未实现。
 
 ## 目录
 
@@ -131,7 +147,7 @@ pnpm build
 
 已验证 TypeScript 检查、pnpm 静态构建、Go 测试（含 race 检测）、Go vet、Go 托管页面，以及浏览器保存配置、后台生成和刷新后的持久化。内核应用使用模拟控制接口测试；未操作本机实际 Mihomo 实例。按需下载脚本已测试平台选择与解压，核实官方 Release 文件名和摘要，未下载或执行实际内核。
 
-当前 SolidStart 1.x / Vinxi 依赖审计存在 14 条传递依赖告警（11 high、3 moderate）；兼容范围内自动修复未消除，强制修复建议会破坏框架版本。生产只发布静态文件，由 Go 托管，不运行 Nitro/Vinxi 服务；开发服务器保持本机使用，后续需跟进框架更新。
+前端已迁移至 SolidStart 2、Vite 8 和 Nitro 3，移除 Vinxi。Node.js 24+ 是开发、构建与 SSR 运行要求；Nitro 3 当前使用带 beta 后缀的官方版本，后续升级需重新验证构建和请求转发。历史静态构建验证记录保留在下文，不能作为本次 SSR 验证结果。
 
 ### 自动安装与启动内核
 
@@ -148,3 +164,9 @@ pnpm build
 已通过前端类型检查与静态构建、Go vet 与编译、节点/模式/跨域保护测试及其余可运行的 Go race 测试。实际开发代理已验证 localhost 与 127.0.0.1 的同源请求正常进入参数校验，外站写入仍被拒绝。使用临时数据目录和模拟 Mihomo 验证生产页面直接访问、配置创建/载入、节点选择、模式切换和后台生成，并在浏览器检查节点与任务页面。未修改实际内核节点或模式。完整测试中的 `TestManagedCoreLifecycle` 和 `TestManagedCorePortConflict` 因本机 9090 已被已有内核占用而未通过，随后跳过这两项运行其余测试；没有停止已有服务。
 
 配置管理导航使用响应式地址参数，支持从快速配置页直接切换、返回与刷新。在隔离的模拟 API 环境中已通过浏览器验证上述路径，前端类型检查与静态构建通过。
+
+### SolidStart 2 SSR 迁移验证
+
+已通过冻结锁文件安装、依赖兼容性检查、TypeScript 检查、Vite 客户端 / SSR / Nitro 构建，以及完整 `go test -race ./...`、`go vet ./...` 和后端编译。使用临时数据目录和未启动的外部控制接口地址运行开发与生产启动脚本，验证首页、配置管理参数、节点与任务页面的 SSR HTML、客户端资源加载、同源保存、后台生成与跨站写入拒绝；开发代理同时验证 localhost 与 127.0.0.1，未知 API 返回 JSON 404。浏览器验证配置管理导航、任务记录与客户端接管，无客户端错误或警告。SSR 停机返回 502、API 保持可用由集成测试覆盖；systemd 模板尚未安装或实机启用。未下载、启动或修改实际 Mihomo 内核。
+
+本次依赖审计剩余 1 条 high 告警：SolidStart 的传递依赖 `braces@3.0.3`（[GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)）。审计建议的 3.0.4 尚未在 npm 注册表发布，未强制覆盖依赖；后续需跟进官方修复。`pnpm start` 默认固定绑定 `127.0.0.1:3001`；自定义回环端口可使用 `NITRO_HOST=127.0.0.1 NITRO_PORT=<port> node .output/server/index.mjs` 并同步设置 Go 的 `NULAS_SSR_URL`。

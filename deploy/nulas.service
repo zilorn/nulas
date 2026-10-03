@@ -1,6 +1,7 @@
 [Unit]
 Description=Nulas configuration API and background worker
-After=network.target
+After=network.target nulas-web.service
+Wants=nulas-web.service
 
 [Service]
 Type=simple
@@ -8,7 +9,7 @@ User=nulas
 Group=nulas
 WorkingDirectory=/opt/nulas
 ExecStart=/opt/nulas/bin/nulas
-Environment=NULAS_WEB_DIR=/opt/nulas/web/.output/public
+Environment=NULAS_SSR_URL=http://127.0.0.1:3001
 Environment=NULAS_ADDR=127.0.0.1:8080
 Environment=NULAS_DATA_DIR=/var/lib/nulas
 EnvironmentFile=-/etc/nulas.env
