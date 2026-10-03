@@ -300,8 +300,14 @@ def run_servers(home):
     activate_tools(metadata)
     source = Path(metadata['current'])
     environment = dict(os.environ)
-    if environment.get('NULAS_WEB_DIR') or environment.get('NULAS_SSR_URL', 'http://127.0.0.1:3001') != 'http://127.0.0.1:3001':
-        raise RuntimeError('nulas run requires the default SSR origin and no NULAS_WEB_DIR')
+    if environment.get('NULAS_WEB_DIR'):
+        raise RuntimeError('nulas run requires no NULAS_WEB_DIR')
+    ports = json.loads(subprocess.check_output([str(source / 'bin' / binary_name()), 'config', '--json'],
+                                              env=environment, text=True))
+    web_address = environment.get('NULAS_ADDR') or f"127.0.0.1:{ports['port']}"
+    # The Node launcher validates and resolves the same saved SSR port and override.
+    subprocess.run([metadata['tools']['node'], str(source / 'web/scripts/server-config.mjs'), 'ssr-port'],
+                   env=environment, check=True, stdout=subprocess.DEVNULL)
     environment.setdefault('NULAS_DATA_DIR', str(home / 'data'))
     environment.setdefault('NULAS_CORE_DIR', str(home / 'runtime/core'))
     environment.setdefault('NULAS_CORE_INSTALLER', str(source / 'scripts/install_core.py'))
@@ -315,11 +321,10 @@ def run_servers(home):
         signal.signal(signum, interrupt)
     try:
         processes.append(subprocess.Popen([str(source / 'bin' / binary_name())], cwd=source / 'backend', env=environment))
-        environment.update(NITRO_HOST='127.0.0.1', NITRO_PORT='3001')
-        processes.append(subprocess.Popen([metadata['tools']['node'], str(source / 'web/.output/server/index.mjs')],
+        processes.append(subprocess.Popen([metadata['tools']['node'], str(source / 'web/scripts/start.mjs')],
                                           cwd=source / 'web', env=environment))
         threading.Thread(target=watch, args=(home, stop), daemon=True).start()
-        print('Nulas: http://' + environment.get('NULAS_ADDR', '127.0.0.1:8080'), flush=True)
+        print('Nulas: http://' + web_address, flush=True)
         while not stop.wait(0.5):
             for process in processes:
                 if process.poll() is not None:

@@ -21,9 +21,11 @@ func execCLI(ctx context.Context, stdout, stderr io.Writer, name string, args ..
 	return cmd.Run()
 }
 
-const cliUsage = `Usage: nulas [install|status|start|stop|restart|run|update|config port [PORT]]
+const cliUsage = `Usage: nulas [install|status|start|stop|restart|run|update|config [KEY [PORT]]]
 
-  config port [PORT]  Show or save the web/API port (1–65535; restart to apply).
+  config [KEY [PORT]] Show all ports, or show/save one (1–65535; restart to apply).
+                     Keys: port (web/API), ssr-port, dev-port.
+                     config --json prints saved/default values as JSON.
 
   run      Run both servers in foreground (quick installation required).
   update   Check/build/install updates (quick installation required).

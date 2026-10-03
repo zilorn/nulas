@@ -15,10 +15,6 @@ if (( $(node -p "process.versions.node.split('.')[0]") < 24 )); then
   echo "需要 Node.js 24+。" >&2
   exit 1
 fi
-if [[ "${NULAS_ADDR:-127.0.0.1:8080}" != "127.0.0.1:8080" ]]; then
-  echo "开发代理要求 NULAS_ADDR=127.0.0.1:8080，请取消自定义监听地址。" >&2
-  exit 1
-fi
 
 cd "$ROOT_DIR/web"
 pnpm install --frozen-lockfile
@@ -45,12 +41,14 @@ trap 'exit 143' TERM
 
 cd "$ROOT_DIR/backend"
 go build -o "$DEV_DIR/nulas" .
+web_addr="${NULAS_ADDR:-127.0.0.1:$("$DEV_DIR/nulas" config port)}"
+dev_port="$("$DEV_DIR/nulas" config dev-port)"
 "$DEV_DIR/nulas" &
 backend_pid=$!
 cd "$ROOT_DIR/web"
-pnpm dev --port 3000 &
+pnpm dev &
 frontend_pid=$!
-printf '\n开发网页：http://localhost:3000\n后端 API：http://127.0.0.1:8080\n按 Ctrl+C 停止前后端；任一服务退出时会停止另一项服务。\n'
+printf '\n开发网页：http://127.0.0.1:%s\n后端 API：http://%s\n按 Ctrl+C 停止前后端；任一服务退出时会停止另一项服务。\n' "$dev_port" "$web_addr"
 status=0
 wait -n "$backend_pid" "$frontend_pid" || status=$?
 echo "开发服务已退出（状态码：$status）。" >&2

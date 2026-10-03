@@ -167,6 +167,34 @@ class SetupTests(unittest.TestCase):
                 setup.update(home)
             self.assertEqual(setup.load(home)['commit'], second)
 
+    def test_run_reads_saved_ports_and_uses_shared_node_launcher(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            source = home / 'release'
+            tools = {key: '/tools/' + key for key in ('git', 'go', 'node', 'python')}
+            setup.atomic_json(home / 'installation.json', {'current': str(source), 'tools': tools})
+            class Process:
+                returncode = 0
+                def poll(self):
+                    return 0
+                def wait(self, timeout=None):
+                    return 0
+            with patch.dict(os.environ, {}, clear=True), \
+                    patch.object(setup, 'activate_tools'), \
+                    patch.object(setup.subprocess, 'check_output', return_value='{"port":8181,"ssr-port":8282,"dev-port":8383}') as query, \
+                    patch.object(setup.subprocess, 'run') as validate, \
+                    patch.object(setup.subprocess, 'Popen', return_value=Process()) as launch, \
+                    patch.object(setup.signal, 'signal'), \
+                    patch.object(setup.threading, 'Thread'), \
+                    patch('builtins.print') as output:
+                with self.assertRaisesRegex(RuntimeError, 'A server exited'):
+                    setup.run_servers(home)
+                self.assertEqual(query.call_args.args[0][-2:], ['config', '--json'])
+                self.assertEqual(validate.call_args.args[0], ['/tools/node', str(source / 'web/scripts/server-config.mjs'), 'ssr-port'])
+                self.assertEqual(launch.call_args_list[1].args[0], ['/tools/node', str(source / 'web/scripts/start.mjs')])
+                self.assertEqual(launch.call_args_list[0].kwargs['env']['NULAS_DATA_DIR'], str(home / 'data'))
+                output.assert_called_once_with('Nulas: http://127.0.0.1:8181', flush=True)
+
     def test_auto_preference_and_failure_are_persisted(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)

@@ -23,8 +23,9 @@ func frontendHandler() http.Handler {
 		}
 		return mux
 	}
-	u, err := url.Parse(env("NULAS_SSR_URL", "http://127.0.0.1:3001"))
-	if err != nil || !validSSRURL(u) {
+	origin, configErr := serverSSRURL()
+	u, err := url.Parse(origin)
+	if configErr != nil || err != nil || !validSSRURL(u) {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusServiceUnavailable, errors.New("invalid NULAS_SSR_URL: expected a loopback HTTP origin"))
 		})

@@ -58,7 +58,7 @@ nulas install
 nulas start
 ```
 
-打开 [http://127.0.0.1:8080](http://127.0.0.1:8080)。快速安装的 Linux 服务使用稳定启动器，重启时读取最新已构建版本。Windows / macOS 暂不提供后台服务安装，使用 `nulas run`。
+打开 [http://127.0.0.1:4669](http://127.0.0.1:4669)。快速安装的 Linux 服务使用稳定启动器，重启时读取最新已构建版本。Windows / macOS 暂不提供后台服务安装，使用 `nulas run`。
 
 ### 更新发现与自动更新
 
@@ -132,11 +132,22 @@ nulas start                    # 启动后端与前端
 nulas status                   # 查看组合服务状态
 ```
 
-打开 [http://127.0.0.1:8080](http://127.0.0.1:8080)。`nulas stop` / `nulas restart` 同时停止或重启前后端，`nulas --help` 查看命令。可将项目 `bin` 的绝对路径加入 shell 配置的 PATH。服务依赖当前项目路径与构建产物，更新代码后重新执行 `./scripts/build.sh` 与 `nulas restart`；迁移目录或更换 Node 路径后先重新执行 `nulas install`。
+打开 [http://127.0.0.1:4669](http://127.0.0.1:4669)。`nulas stop` / `nulas restart` 同时停止或重启前后端，`nulas --help` 查看命令。可将项目 `bin` 的绝对路径加入 shell 配置的 PATH。服务依赖当前项目路径与构建产物，更新代码后重新执行 `./scripts/build.sh` 与 `nulas restart`；迁移目录或更换 Node 路径后先重新执行 `nulas install`。
 
-使用 `nulas config port 9090` 保存 Web 页面与 API 的端口，再运行 `nulas restart`（前台模式请停止后重新启动）。`nulas config port` 查询保存值，未配置时为 `8080`。允许范围为 `1–65535`；端口必须可用，普通用户通常不能绑定低于 `1024` 的端口，生产启动脚本的 SSR 服务占用 `3001`。该配置不改变 Mihomo 的代理端口，也不改变开发服务器的 `3000` 端口。
+三个 Nulas 端口均可在 CLI 中自定义，默认 Web/API 为 `4669`、SSR 为 `4668`、开发前端为 `4589`：
 
-端口通过原子写入保存至当前用户配置目录的 `nulas/server.json`（Linux 默认 `~/.config/nulas/server.json`，遵循 `XDG_CONFIG_HOME`；macOS/Windows 使用系统用户配置目录），从任意工作目录执行命令均使用同一文件。CLI 与服务应使用同一用户和配置目录。`NULAS_ADDR` 优先于保存值；若服务的 `service.env` 中设置了它，请移除该覆盖以使用保存端口。默认地址仍为 `127.0.0.1:8080`。
+```sh
+nulas config                   # 显示全部保存值；未保存的项目显示默认值
+nulas config port 4769         # Web 页面与 API
+nulas config ssr-port 4768     # 生产 SSR 前端
+nulas config dev-port 4689     # 开发前端
+nulas config ssr-port          # 查询单项（port / dev-port 同理）
+nulas restart                 # Linux 服务重启；前台与开发模式停止后重新启动
+```
+
+允许范围为 `1–65535`，端口必须可用，Web/API 与 SSR 必须使用不同端口；普通用户通常不能绑定低于 `1024` 的端口。`scripts/start.sh`、`nulas run`、`pnpm start` 与开发服务器会读取同一配置，开发 `/api` 代理自动跟随 Web/API 端口。这些设置不改变 Mihomo 的控制端口或代理端口。
+
+端口通过原子写入保存至当前用户配置目录的 `nulas/server.json`（Linux 默认 `~/.config/nulas/server.json`，遵循 `XDG_CONFIG_HOME`；macOS/Windows 使用系统用户配置目录），从任意工作目录执行命令均使用同一文件。CLI 与服务应使用同一用户和配置目录。旧文件中保存的 `port` 和其他字段会保留，缺少的项目使用新默认值。`NULAS_ADDR` 和 `NULAS_SSR_URL` 分别优先于保存的 Web/API 和 SSR 端口；若服务的 `service.env` 中设置了它们，请移除覆盖以使用保存值。生产启动器按 `NULAS_SSR_URL` 的回环地址和端口启动 Node；`NITRO_HOST` / `NITRO_PORT` 由启动器统一设置。`nulas config --json` 可供脚本读取保存值和默认值。
 
 已有内核时，在启动服务前把 `MIHOMO_CONTROLLER`、`MIHOMO_SECRET` 等写入 `~/.config/nulas/service.env` 并设为权限 `600`；安装器不会复制终端环境中的凭据。开机自启由网页开关控制、注册状态由 systemd 持久保存；没有 linger 的用户服务只在登录后启动，必要时执行 `loginctl enable-linger`（可能需要主机管理员授权，应用不会代为提权），也可直接运行 `python3 scripts/install_service.py`。
 
@@ -159,7 +170,7 @@ cd backend && go run .
 cd web && pnpm install --frozen-lockfile && pnpm dev
 ```
 
-开发页面为 http://localhost:3000，开发服务器将 `/api` 转发至 `127.0.0.1:8080`（请勿自定义 `NULAS_ADDR`）。已有 Mihomo 服务时：
+开发页面为 http://127.0.0.1:4589，开发服务器将 `/api` 转发至 `127.0.0.1:4669`（自动读取 CLI 端口配置，也支持 `NULAS_ADDR` 覆盖）。已有 Mihomo 服务时：
 
 ```sh
 cd backend
@@ -188,7 +199,7 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 | `nulas install` | 安装 / 更新 Linux 用户级组合服务，不启动、不开启自启（需要 Python 3） |
 | `nulas status` | 查看服务状态与近期日志；未运行时返回非零退出码 |
 | `nulas start` / `stop` / `restart` | 启动、停止、重启前后端 |
-| `nulas config port [PORT]` | 查询或保存 Web/API 端口，重启后生效 |
+| `nulas config [port\|ssr-port\|dev-port] [PORT]` | 显示全部端口，或查询 / 保存单项，重启后生效 |
 | `nulas`（无参数） | 前台只运行后端 |
 | `nulas --help` | 显示用法 |
 
@@ -208,8 +219,8 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | `NULAS_INSTALL_HOME` | 快速安装器设置的安装目录 | CLI 更新管理；通常无需手工设置 |
-| `NULAS_ADDR` | `127.0.0.1:8080`（或 CLI 保存的端口） | Web/API 监听地址，显式设置时覆盖 CLI 端口 |
-| `NULAS_SSR_URL` | `http://127.0.0.1:3001` | Go 转发页面请求的本机 SSR 地址（仅支持 HTTP 回环 IP） |
+| `NULAS_ADDR` | `127.0.0.1:4669`（或 CLI 保存的端口） | Web/API 监听地址，显式设置时覆盖 CLI 端口 |
+| `NULAS_SSR_URL` | `http://127.0.0.1:4668`（或 CLI 保存的 SSR 端口） | Go 转发页面请求的本机 SSR 地址（仅支持 HTTP 回环 IP） |
 | `NULAS_WEB_DIR` | 空 | 显式启用旧版静态网页托管；不能用于 SSR 构建 |
 | `NULAS_DATA_DIR` | `.data`（相对工作目录） | 配置、任务和生成文件 |
 | `MIHOMO_CONTROLLER` | 空 | 内核控制 API，例如 `http://127.0.0.1:9090` |

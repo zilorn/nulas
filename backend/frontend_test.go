@@ -73,3 +73,21 @@ func TestSSRURLValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestSavedSSRPortRoutesPages(t *testing.T) {
+	isolatedServerConfig(t)
+	t.Setenv("NULAS_WEB_DIR", "")
+	t.Setenv("NULAS_SSR_URL", "")
+	ssr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("saved SSR")) }))
+	defer ssr.Close()
+	u, _ := url.Parse(ssr.URL)
+	var out, stderr strings.Builder
+	if code := runCLI([]string{"config", "ssr-port", u.Port()}, &out, &stderr, nil, nil); code != 0 {
+		t.Fatal(stderr.String())
+	}
+	w := httptest.NewRecorder()
+	frontendHandler().ServeHTTP(w, httptest.NewRequest("GET", "/nodes", nil))
+	if w.Code != 200 || w.Body.String() != "saved SSR" {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}

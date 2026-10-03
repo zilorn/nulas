@@ -5,11 +5,12 @@ Nulas is a browser-based quick configuration dashboard for https://github.com/Me
 
 ## Commands
 - `cd web && pnpm install --frozen-lockfile`: install locked frontend dependencies.
-- `cd web && pnpm dev`: start the frontend at localhost:3000 (proxies /api to the Go backend).
+- `cd web && pnpm dev`: start the frontend at localhost:4589 (proxies /api to the Go backend).
 - `cd web && pnpm typecheck`: check TypeScript.
 - `cd web && pnpm build`: build the production frontend.
-- Node.js 24+ is required. Build the frontend and backend, then run `scripts/start.sh` to start both services. Go serves the API and proxies page requests to the loopback Node SSR service on port 3001. `NULAS_SSR_URL` selects the SSR origin; `NULAS_WEB_DIR` is an explicit legacy static fallback. Do not introduce Nginx.
-- `cd backend && go run .`: start the API at 127.0.0.1:8080.
+- Node.js 24+ is required. Build the frontend and backend, then run `scripts/start.sh` to start both services. Go serves the API and proxies page requests to the loopback Node SSR service on port 4668. `NULAS_SSR_URL` selects the SSR origin; `NULAS_WEB_DIR` is an explicit legacy static fallback. Do not introduce Nginx.
+- `cd backend && go run .`: start the API at 127.0.0.1:4669.
+- `nulas config [port|ssr-port|dev-port] [PORT]`: inspect or save Web/API, production SSR and development frontend ports; restart to apply. All launchers read the same user configuration.
 - `cd backend && go test -race ./...`: run backend tests and race detection.
 - `cd backend && go vet ./...`: inspect Go code.
 - `python3 scripts/install_core.py`: download an official prebuilt core on demand into ignored `.runtime/core/`.
