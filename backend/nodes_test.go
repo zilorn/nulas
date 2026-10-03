@@ -99,6 +99,43 @@ func TestNodeControllerFailures(t *testing.T) {
 	}
 }
 
+func TestRuntimeFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, target string
+		configured         bool
+		status             int
+	}{
+		{"configured", `{"rules":[{"type":"Domain","proxy":"Other","payload":"private-domain"},{"type":"Match","proxy":"兜底"}]}`, "兜底", true, 200},
+		{"first enabled match", `{"rules":[{"type":"Match","proxy":"Disabled","extra":{"disabled":true}},{"type":"MATCH","proxy":"First"},{"type":"Match","proxy":"Last"}]}`, "First", true, 200},
+		{"pass", `{"rules":[{"type":"Match","proxy":"PASS"},{"type":"Match","proxy":"PASS-RULE"},{"type":"Match","proxy":"REJECT"}]}`, "REJECT", true, 200},
+		{"no match", `{"rules":[{"type":"Domain","proxy":"Other"}]}`, "DIRECT", false, 200},
+		{"empty rules", `{"rules":[]}`, "DIRECT", false, 200},
+		{"missing rules", `{}`, "", false, 502},
+		{"invalid response", `invalid`, "", false, 502},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "GET" || r.URL.Path != "/rules" {
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+				}
+				w.Write([]byte(tc.body))
+			}))
+			defer core.Close()
+			w := request(testApp(t, core.URL), "GET", "/api/runtime/fallback", "")
+			if w.Code != tc.status {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if tc.status != 200 {
+				return
+			}
+			var result map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || len(result) != 2 || result["target"] != tc.target || result["configured"] != tc.configured {
+				t.Fatalf("unexpected fallback response: %s", w.Body.String())
+			}
+		})
+	}
+}
+
 func TestWriteOriginProtection(t *testing.T) {
 	for _, test := range []struct {
 		host, origin string

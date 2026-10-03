@@ -66,7 +66,7 @@ Mihomo 本身需要启用 `external-controller` 和对应 `secret`。外部控�
 - 核心参数配置仍可载入快速配置页，后台生成只包含五项参数。完整配置在配置库直接选择“生成”或“应用”：任务保存独立的完整文档快照，生成到 `.data/<job-id>.yaml` 时保留原文；应用调用 Mihomo `PUT /configs?force=true` 的 `payload`，重载节点、代理组、规则、DNS 及 providers，不覆盖用户的原始配置文件。应用副本固定本机监听，禁用 TUN、iptables、透明代理、自定义入站监听及 NTP 系统时间写入，移除 DNS 服务监听和导入的控制接口字段；控制接口及凭据保持不变。HTTP providers 使用每次任务独立的 `.nulas/` 相对缓存路径，避免覆盖导入文件所指定的缓存。已有 TUN 或透明代理运行时拒绝应用，以免改变现有系统网络状态。原始配置仍完整保留在状态和生成文件中。
 - `应用到内核`：后台调用官方 [`PATCH /configs`](https://wiki.metacubex.one/api/#configs) 接口，仅修改运行参数，不替换原有节点、规则及控制接口配置。这些运行修改重启内核后可能被内核配置文件覆盖。
 - 独立后台任务页面 `/tasks`，展示任务结果、提交时间与状态筛选。
-- 节点管理页面 `/nodes`：通过官方 [`GET /proxies`、`PUT /proxies/{name}` 与 `PATCH /configs`](https://wiki.metacubex.one/api/) 读取当前内核配置，选择手动代理组（Selector）的成员，并立即切换规则、全局、直连模式。全局模式使用 GLOBAL 组；规则模式使用规则指定的代理组。自动组只展示。密钥留在服务端，接口响应仅返回展示字段，响应最多 2 MB。操作失败明确显示错误，不自动重试外部操作。运行选择可能在内核重启或重载配置后恢复，模式切换不覆盖快速配置草稿或配置库。
+- 节点管理页面 `/nodes`：通过官方 [`GET /proxies`、`PUT /proxies/{name}` 与 `PATCH /configs`](https://wiki.metacubex.one/api/) 读取当前内核配置，选择手动代理组（Selector）的成员，并立即切换规则、全局、直连模式。全局模式仅显示 GLOBAL 组；规则模式隐藏 GLOBAL，使用规则指定的代理组；直连模式仅显示直连说明，不提供节点选择。代理组侧栏与节点列表分别在固定高度区域内滚动，移动端代理组横向滚动。规则模式额外通过 `GET /rules` 读取首个启用且目标不是 PASS / PASS-RULE 的 MATCH 规则，显示未命中前面规则时的兜底出口；没有此类 MATCH 时显示内核默认 DIRECT。兜底出口是现有代理组时可进入该组选择成员，自动组只展示；改变 MATCH 的目标本身需修改完整配置后显式应用，不提供规则编辑。规则读取失败单独显示，不影响节点列表。密钥留在服务端，接口响应仅返回展示字段，响应最多 2 MB。操作失败明确显示错误，不自动重试外部操作。运行选择可能在内核重启或重载配置后恢复，模式切换不覆盖快速配置草稿或配置库。
 - 任务状态 `queued → running → succeeded / failed` 持久保存；网页每两秒更新状态，关闭网页不会取消操作。
 - 后端重启后恢复排队任务；之前执行中的任务标记失败，避免重复执行不确定的外部操作。操作失败可重新提交。
 
@@ -194,3 +194,7 @@ getcap /absolute/path/to/mihomo
 任务通过现有单 worker 持久队列执行，网页关闭不影响操作；中断的运行任务在重启后标为失败。执行结果在后台任务页可见。实现依据 [Mihomo TUN 文档](https://wiki.metacubex.one/en/config/inbound/tun/) 和 [配置接口源码](https://github.com/MetaCubeX/mihomo/blob/Meta/hub/route/configs.go)。
 
 验证：TUN 权限不足拒绝、外部内核保护、状态不一致拒绝、关闭请求范围、开启失败回退、任务中断恢复与配置快照拒绝的测试通过；排除占用 9090 端口的两个托管启动测试后，Go race 全套测试、Go vet、后端构建、TypeScript 检查及生产构建通过。使用模拟 API 在浏览器检查了授权命令和重新检查流程。尚未授予实际内核权限或创建真实 TUN 网卡，未验证实机流量转发。
+
+### 节点模式与滚动验证
+
+已通过 `pnpm typecheck`、`pnpm test:nodes`、生产构建、Go vet 与后端编译。模式测试覆盖规则 / 全局 / 直连、未知模式及缺失 GLOBAL；兜底接口测试覆盖 MATCH 顺序、禁用规则、PASS、无 MATCH 和无效响应。Go race 全套运行中两项已有托管内核测试因真实服务占用 9090 端口失败，跳过 `TestManagedCoreLifecycle`、`TestManagedCorePortConflict` 后其余全部通过。使用临时数据与模拟控制器验证独立滚动、三种模式过滤、返回规则模式保留代理组、兜底组导航和成员切换摘要更新，浏览器无错误。未修改真实内核模式、节点或系统网络。

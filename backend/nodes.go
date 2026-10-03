@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -76,6 +77,32 @@ func (a *App) proxies(ctx context.Context) (map[string]Proxy, error) {
 	return data.Proxies, err
 }
 func (a *App) nodeRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/runtime/fallback", func(w http.ResponseWriter, r *http.Request) {
+		var data struct {
+			Rules []struct {
+				Type  string `json:"type"`
+				Proxy string `json:"proxy"`
+				Extra struct {
+					Disabled bool `json:"disabled"`
+				} `json:"extra"`
+			} `json:"rules"`
+		}
+		if err := a.controllerRequest(r.Context(), "GET", "/rules", nil, &data); err != nil {
+			fail(w, 502, err)
+			return
+		}
+		if data.Rules == nil {
+			fail(w, 502, errors.New("内核没有返回有效的规则列表"))
+			return
+		}
+		for _, rule := range data.Rules {
+			if strings.EqualFold(rule.Type, "MATCH") && !rule.Extra.Disabled && rule.Proxy != "" && rule.Proxy != "PASS" && rule.Proxy != "PASS-RULE" {
+				reply(w, 200, map[string]any{"target": rule.Proxy, "configured": true})
+				return
+			}
+		}
+		reply(w, 200, map[string]any{"target": "DIRECT", "configured": false})
+	})
 	mux.HandleFunc("GET /api/nodes", func(w http.ResponseWriter, r *http.Request) {
 		proxies, err := a.proxies(r.Context())
 		if err != nil {
