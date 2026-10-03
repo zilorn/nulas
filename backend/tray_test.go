@@ -169,3 +169,51 @@ func TestStartupPreferencePersistsBeforeSystemOperation(t *testing.T) {
 		t.Fatal("failed persistence altered system registration")
 	}
 }
+
+func TestTrayInstallationProgressAndFailure(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("Python unavailable")
+	}
+	for _, outcome := range []string{"READY", "ERROR 安装失败"} {
+		t.Run(outcome, func(t *testing.T) {
+			script := filepath.Join(t.TempDir(), "helper.py")
+			body := "import sys, time\nprint('STATUS 正在安装依赖', flush=True)\ntime.sleep(2.5)\nprint('" + outcome + "', flush=True)\n"
+			if outcome == "READY" {
+				body += "sys.stdin.buffer.read()\n"
+			}
+			if err := os.WriteFile(script, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("NULAS_PYTHON", python)
+			t.Setenv("NULAS_TRAY_SCRIPT", script)
+			a, err := newApp(t.TempDir(), "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			a.trayContext, a.trayURL = ctx, "http://127.0.0.1:8080"
+			defer func() { a.trayMu.Lock(); a.stopTray(); a.trayMu.Unlock() }()
+			w := request(a, "PUT", "/api/runtime/tray", `{"enabled":true}`)
+			if w.Code != 200 {
+				t.Fatal(w.Body.String())
+			}
+			if s := a.trayStatus(); s.Running || s.Message != "正在安装依赖" {
+				t.Fatal(s)
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) {
+				s := a.trayStatus()
+				if outcome == "READY" && s.Running {
+					return
+				}
+				if outcome != "READY" && !s.Running && s.Message == "安装失败" {
+					return
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			t.Fatal(a.trayStatus())
+		})
+	}
+}

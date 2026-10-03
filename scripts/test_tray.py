@@ -53,6 +53,7 @@ class NativeHelperContractTests(unittest.TestCase):
         output = io.StringIO()
         stdin = types.SimpleNamespace(buffer=io.BytesIO())
         with patch.dict("sys.modules", {"pystray": native, "PIL": pillow}), \
+                patch("tray_dependencies.prepare_linux"), \
                 patch.object(tray.sys, "argv", ["tray.py", "--url", "http://127.0.0.1:8080"]), \
                 patch.object(tray.sys, "stdin", stdin), patch.object(tray.sys, "stdout", output), \
                 patch.object(tray.webbrowser, "open") as open_browser:

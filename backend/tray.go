@@ -99,20 +99,45 @@ func (a *App) startTray() {
 	a.tray = process
 	a.mu.Unlock()
 	ready := make(chan bool, 1)
+	scanned := make(chan struct{})
 	go func() {
+		defer close(scanned)
 		scanner := bufio.NewScanner(output)
 		scanner.Buffer(make([]byte, 256), 1024)
-		ok := scanner.Scan() && scanner.Text() == "READY"
+		ok := false
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "READY" {
+				a.mu.Lock()
+				if a.tray == process {
+					process.ready = true
+					a.trayError = ""
+				}
+				a.mu.Unlock()
+				ok = true
+				break
+			}
+			if strings.HasPrefix(line, "STATUS ") || strings.HasPrefix(line, "ERROR ") {
+				a.mu.Lock()
+				if a.tray == process {
+					a.trayError = strings.SplitN(line, " ", 2)[1]
+				}
+				a.mu.Unlock()
+			}
+		}
 		ready <- ok
 		io.Copy(io.Discard, output)
 	}()
 	go func() {
+		<-scanned
 		cmd.Wait()
 		input.Close()
 		a.mu.Lock()
 		if a.tray == process {
 			a.tray = nil
-			a.trayError = "托盘已退出；请检查桌面托盘支持，并安装 scripts/requirements-tray.txt 中的依赖后重新开启。"
+			if a.trayError == "" || strings.HasPrefix(a.trayError, "正在") {
+				a.trayError = "托盘已退出；请检查依赖与桌面托盘支持后重新开启。"
+			}
 		}
 		a.mu.Unlock()
 		close(process.done)
@@ -128,10 +153,42 @@ func (a *App) startTray() {
 			return
 		}
 	case <-ctx.Done():
-	case <-time.After(10 * time.Second):
+	case <-time.After(2 * time.Second):
+		// Installation continues in the helper; GET exposes progress and readiness.
+		go func() {
+			select {
+			case ok := <-ready:
+				if ok {
+					return
+				}
+			case <-process.done:
+				return
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Minute):
+			}
+			a.trayMu.Lock()
+			a.mu.Lock()
+			current := a.tray == process
+			a.mu.Unlock()
+			if current {
+				a.stopTray()
+				a.mu.Lock()
+				if a.trayError == "" || strings.HasPrefix(a.trayError, "正在") {
+					a.trayError = "托盘启动失败或超时，请检查依赖安装与桌面支持后重试。"
+				}
+				a.mu.Unlock()
+			}
+			a.trayMu.Unlock()
+		}()
+		return
 	}
 	a.stopTray()
-	failure("托盘启动失败：请安装 scripts/requirements-tray.txt 中的依赖，并检查桌面托盘支持。Linux 需要 GTK/AppIndicator 与桌面托盘区域。")
+	a.mu.Lock()
+	if a.trayError == "" {
+		a.trayError = "托盘启动失败：请检查 Python 依赖与桌面托盘支持。Linux 会自动安装缺失依赖。"
+	}
+	a.mu.Unlock()
 }
 func (a *App) stopTray() {
 	a.mu.Lock()

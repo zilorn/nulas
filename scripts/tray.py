@@ -21,6 +21,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True, type=dashboard_url)
     args = parser.parse_args()
+    if sys.platform == "linux":
+        from tray_dependencies import prepare_linux
+        prepare_linux()
     import pystray
     from PIL import Image, ImageDraw
 
@@ -57,4 +60,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        print("ERROR " + str(exc).replace("\n", " ")[:800], flush=True)
+        sys.exit(1)
