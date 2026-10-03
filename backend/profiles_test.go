@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -282,5 +283,52 @@ func TestLargeImports(t *testing.T) {
 	}
 	if len(a.state.Profiles) != 3 {
 		t.Fatal("large imports not saved")
+	}
+}
+
+func TestSubscriptionImportErrors(t *testing.T) {
+	links := "ss://private-credential@example.com:443#node\r\nvless://private-id@example.com:443#node\n"
+	for _, encoding := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		encoded := encoding.EncodeToString([]byte(links))
+		// BOM, wrapping and whitespace are common in exported subscriptions.
+		content := "\ufeff " + encoded[:12] + "\r\n\t" + encoded[12:] + "\n"
+		t.Run(encoding.EncodeToString([]byte{255, 255}), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/plain")
+				fmt.Fprint(w, content)
+			}))
+			defer server.Close()
+			for _, source := range []string{"url", "content"} {
+				a := testApp(t, "")
+				value := content
+				if source == "url" {
+					value = server.URL + "?token=private-token"
+				}
+				body, _ := json.Marshal(map[string]string{"name": "Subscription", source: value})
+				w := request(a, "POST", "/api/profiles", string(body))
+				if w.Code != 400 || !strings.Contains(w.Body.String(), "Base64") || !strings.Contains(w.Body.String(), "当前不支持节点订阅") {
+					t.Fatalf("%s: %d %s", source, w.Code, w.Body.String())
+				}
+				if len(a.state.Profiles) != 0 || a.state.Config.Port != 7890 {
+					t.Fatal("rejected subscription changed state")
+				}
+				for _, secret := range []string{"private-credential", "private-id", "private-token", "example.com", encoded} {
+					if strings.Contains(w.Body.String(), secret) {
+						t.Fatal("subscription details leaked")
+					}
+				}
+			}
+		})
+	}
+	if _, err := importConfig(links); err == nil || !strings.Contains(err.Error(), "节点订阅链接") {
+		t.Fatalf("plain subscription: %v", err)
+	}
+	// Valid scalar configurations with URL-like names must remain importable.
+	if _, err := importConfig("name: https://example.com\nmode: rule"); err != nil {
+		t.Fatal(err)
+	}
+	// Arbitrary encoded text must not be mislabeled as a node subscription.
+	if err := unsupportedImportFormat(base64.StdEncoding.EncodeToString([]byte("hello"))); err != nil {
+		t.Fatal(err)
 	}
 }

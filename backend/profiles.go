@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -42,6 +43,9 @@ func importNamedConfig(content string) (importedConfig, error) {
 	content = strings.TrimSpace(strings.TrimPrefix(content, "\ufeff"))
 	if content == "" {
 		return c, errors.New("配置内容不能为空")
+	}
+	if err := unsupportedImportFormat(content); err != nil {
+		return c, err
 	}
 	var fields map[string]json.RawMessage
 	if strings.HasPrefix(content, "{") {
@@ -154,6 +158,53 @@ func importNamedConfig(content string) (importedConfig, error) {
 		return c, errors.New("文件内的配置名称不能超过 60 个字符")
 	}
 	return c, validate(c.Config)
+}
+
+// Subscription links are not core-setting documents. Inspect decoded content only
+// to identify the format; never return node links or credentials in errors.
+func unsupportedImportFormat(content string) error {
+	if isNodeSubscription(content) {
+		return errors.New("导入内容是节点订阅链接，不是 YAML/JSON 核心配置；当前不支持节点订阅，请提供仅含核心参数的配置文件")
+	}
+	// A colon cannot occur in Base64. Avoid decoding ordinary YAML/JSON.
+	if strings.Contains(content, ":") {
+		return nil
+	}
+	// Providers may use padded/unpadded standard or URL-safe Base64 with line wrapping.
+	compact := strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' || r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, content)
+	for _, encoding := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		decoded, err := encoding.DecodeString(compact)
+		if err == nil && isNodeSubscription(string(decoded)) {
+			return errors.New("导入内容是 Base64 编码的节点订阅，不是 YAML/JSON 核心配置；当前不支持节点订阅，请提供仅含核心参数的配置文件")
+		}
+	}
+	return nil
+}
+
+func isNodeSubscription(content string) bool {
+	found := false
+	for _, line := range strings.Split(strings.TrimPrefix(content, "\ufeff"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		scheme, _, ok := strings.Cut(line, "://")
+		if !ok {
+			return false
+		}
+		switch strings.ToLower(scheme) {
+		case "ss", "ssr", "vmess", "vless", "trojan", "hysteria", "hysteria2", "hy2", "tuic", "socks", "socks5", "http", "https", "wireguard":
+			found = true
+		default:
+			return false
+		}
+	}
+	return found
 }
 
 // URLs may contain tokens: never persist them or include them in errors.
