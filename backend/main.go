@@ -41,9 +41,11 @@ type Job struct {
 	Document  string    `json:"document,omitempty"`
 }
 type State struct {
-	Config   Config    `json:"config"`
-	Jobs     []Job     `json:"jobs"`
-	Profiles []Profile `json:"profiles"`
+	Config      Config            `json:"config"`
+	Jobs        []Job             `json:"jobs"`
+	Profiles    []Profile         `json:"profiles"`
+	ProxyBackup map[string]string `json:"proxyBackup,omitempty"`
+	ProxyPort   int               `json:"proxyPort,omitempty"`
 }
 type App struct {
 	mu                      sync.Mutex
@@ -56,6 +58,7 @@ type App struct {
 	coreCommand             *exec.Cmd
 	coreDone                chan struct{}
 	coreRuntime             CoreStatus
+	systemCommand           func(context.Context, string, ...string) (string, error)
 }
 
 func validate(c Config) error {
@@ -196,6 +199,7 @@ func (a *App) handler() http.Handler {
 	a.profileRoutes(mux)
 	a.nodeRoutes(mux)
 	a.tunRoutes(mux)
+	a.systemRoutes(mux)
 	mux.HandleFunc("GET /api/jobs", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -214,7 +218,7 @@ func (a *App) handler() http.Handler {
 			fail(w, 400, e)
 			return
 		}
-		if body.Action != "generate" && body.Action != "apply" && body.Action != "install-core" && body.Action != "tun-enable" && body.Action != "tun-disable" {
+		if body.Action != "generate" && body.Action != "apply" && body.Action != "install-core" && body.Action != "tun-enable" && body.Action != "tun-disable" && body.Action != "proxy-enable" && body.Action != "proxy-disable" {
 			fail(w, 400, errors.New("invalid action"))
 			return
 		}
@@ -241,8 +245,8 @@ func (a *App) handler() http.Handler {
 		}
 		j := Job{ID: hex.EncodeToString(id), Action: body.Action, Status: "queued", Message: "Waiting for worker", Created: time.Now().UTC(), Config: a.state.Config}
 		if body.ProfileID != "" {
-			if body.Action == "install-core" || body.Action == "tun-enable" || body.Action == "tun-disable" {
-				fail(w, 400, errors.New("内核与 TUN 操作不能指定配置"))
+			if body.Action == "install-core" || body.Action == "tun-enable" || body.Action == "tun-disable" || body.Action == "proxy-enable" || body.Action == "proxy-disable" {
+				fail(w, 400, errors.New("内核、TUN 与系统代理操作不能指定配置"))
 				return
 			}
 			found := false
@@ -294,6 +298,9 @@ func (a *App) handler() http.Handler {
 	})
 }
 func (a *App) runJob(j Job) error {
+	if j.Action == "proxy-enable" || j.Action == "proxy-disable" {
+		return a.setSystemProxy(j.Action == "proxy-enable")
+	}
 	if j.Action == "tun-enable" || j.Action == "tun-disable" {
 		return a.setTUN(j.Action == "tun-enable")
 	}
@@ -402,6 +409,12 @@ func (a *App) process() bool {
 		if j.Action == "tun-enable" {
 			a.state.Jobs[idx].Message = "TUN 已开启，内核配置与网卡已检查"
 		}
+	}
+	if j.Action == "proxy-enable" {
+		a.state.Jobs[idx].Message = "系统代理已开启并回读检查"
+	}
+	if j.Action == "proxy-disable" {
+		a.state.Jobs[idx].Message = "原系统代理设置已恢复并检查"
 	}
 	if err != nil {
 		a.state.Jobs[idx].Status = "failed"
