@@ -34,8 +34,9 @@ type Job struct {
 	Config  Config    `json:"config"`
 }
 type State struct {
-	Config Config `json:"config"`
-	Jobs   []Job  `json:"jobs"`
+	Config   Config    `json:"config"`
+	Jobs     []Job     `json:"jobs"`
+	Profiles []Profile `json:"profiles"`
 }
 type App struct {
 	mu                      sync.Mutex
@@ -169,6 +170,7 @@ func (a *App) handler() http.Handler {
 		}
 		reply(w, 200, c)
 	})
+	a.profileRoutes(mux)
 	mux.HandleFunc("GET /api/jobs", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
