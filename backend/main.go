@@ -40,7 +40,14 @@ type Job struct {
 	ProfileID string    `json:"profileId,omitempty"`
 	Document  string    `json:"document,omitempty"`
 }
+type Preferences struct {
+	Tray    bool  `json:"tray"`
+	Proxy   *bool `json:"proxy,omitempty"`
+	TUN     *bool `json:"tun,omitempty"`
+	Startup *bool `json:"startup,omitempty"`
+}
 type State struct {
+	Preferences Preferences       `json:"preferences"`
 	Applied     *AppliedConfig    `json:"applied,omitempty"`
 	Config      Config            `json:"config"`
 	Jobs        []Job             `json:"jobs"`
@@ -50,6 +57,11 @@ type State struct {
 }
 type App struct {
 	mu                      sync.Mutex
+	trayMu                  sync.Mutex
+	tray                    *trayProcess
+	trayError               string
+	trayContext             context.Context
+	trayURL                 string
 	controlMu               sync.Mutex
 	state                   State
 	dir, controller, secret string
@@ -221,6 +233,12 @@ func (a *App) handler() http.Handler {
 	a.nodeRoutes(mux)
 	a.tunRoutes(mux)
 	a.systemRoutes(mux)
+	a.trayRoutes(mux)
+	mux.HandleFunc("GET /api/preferences", func(w http.ResponseWriter, r *http.Request) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		reply(w, 200, a.state.Preferences)
+	})
 	mux.HandleFunc("GET /api/jobs", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -283,9 +301,19 @@ func (a *App) handler() http.Handler {
 				return
 			}
 		}
+		previousPreferences := a.state.Preferences
+		switch body.Action {
+		case "proxy-enable", "proxy-disable":
+			enabled := body.Action == "proxy-enable"
+			a.state.Preferences.Proxy = &enabled
+		case "tun-enable", "tun-disable":
+			enabled := body.Action == "tun-enable"
+			a.state.Preferences.TUN = &enabled
+		}
 		a.state.Jobs = append(a.state.Jobs, j)
 		if e := a.persist(); e != nil {
 			a.state.Jobs = a.state.Jobs[:len(a.state.Jobs)-1]
+			a.state.Preferences = previousPreferences
 			fail(w, 500, e)
 			return
 		}
@@ -482,6 +510,23 @@ func main() {
 	defer listener.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	a.trayContext = ctx
+	a.trayURL = "http://" + listener.Addr().String()
+	go func() {
+		a.mu.Lock()
+		enabled := a.state.Preferences.Tray
+		a.mu.Unlock()
+		if enabled {
+			a.trayMu.Lock()
+			a.startTray()
+			a.trayMu.Unlock()
+		}
+		<-ctx.Done()
+		a.trayMu.Lock()
+		a.stopTray()
+		a.trayMu.Unlock()
+	}()
+	defer func() { a.trayMu.Lock(); a.stopTray(); a.trayMu.Unlock() }()
 	if a.controller == "" {
 		a.managedContext = ctx
 		a.mu.Lock()

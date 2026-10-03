@@ -163,6 +163,19 @@ func (a *App) systemRoutes(mux *http.ServeMux) {
 				fail(w, 409, errors.New(status.Message))
 				return
 			}
+			// Save intent before the external operation. Actual status remains authoritative.
+			a.mu.Lock()
+			previous := a.state.Preferences.Startup
+			a.state.Preferences.Startup = body.Startup
+			err := a.persist()
+			if err != nil {
+				a.state.Preferences.Startup = previous
+			}
+			a.mu.Unlock()
+			if err != nil {
+				fail(w, 500, err)
+				return
+			}
 			action := "disable"
 			if *body.Startup {
 				action = "enable"

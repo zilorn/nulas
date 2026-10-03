@@ -233,3 +233,23 @@ API：`GET /api/runtime/system` 返回能力、实测状态与说明；`PUT /api
 配置管理显示最后成功应用的名称、核心参数、时间和“已应用 · 已保存”，对应库卡片也显示标记，页面每两秒更新状态。快速配置的应用结果即使没有配置库模板，也会在该页面独立显示。此状态表示 Nulas 最后成功应用的记录，外部修改内核不会同步；外部控制器的进程重启仍由其自身配置管理负责。托管启动继续使用回环监听、新生成的服务端密钥，TUN 与透明代理默认关闭，不恢复系统代理或重放其他系统操作。完整文档与凭据仍只保存在后端。
 
 验证：成功快照持久化、失败保留、完整配置与参数叠加、旧记录迁移、中断任务不重放、凭据隔离和启动安全设置测试通过；前端类型检查与生产构建、Go vet 和后端构建通过。Go race 全套中四项已有环境依赖测试受当前 9090 端口占用和运行中的 TUN 网卡影响，排除这四项后其余测试通过。未重启或重载实际运行内核，实际进程重启恢复尚未实机验证。
+
+## 桌面托盘与开关保存
+
+快速配置页的“系统设置”提供托盘开关，支持 Windows 通知区域、macOS 菜单栏和 Linux 桌面托盘。托盘菜单可打开面板、节点管理及后台任务，使用默认浏览器，不引入桌面浏览器外壳。先在后端使用的 Python 环境安装可选依赖：
+
+```sh
+python3 -m pip install -r scripts/requirements-tray.txt
+# Windows
+python -m pip install -r scripts/requirements-tray.txt
+```
+
+macOS/Windows 使用 pystray 的原生后端；Linux 需要 GTK/AppIndicator 的 PyGObject 运行环境（通常由发行版包提供）及桌面托盘区域。GNOME 通常还需要 AppIndicator 扩展；纯 Xorg fallback 不支持菜单，因此不启用。无桌面会话的 systemd 服务、容器和 SSH 会话不能保证显示图标。应从当前用户的桌面会话启动后端。实现依据 [pystray 的平台说明](https://pystray.readthedocs.io/en/latest/usage.html)。安装或桌面支持不足时显示失败并提供重试，不会将保存偏好显示为运行成功。
+
+托盘默认关闭，偏好保存到 `NULAS_DATA_DIR/state.json` 的 `preferences`，后端重启时尝试恢复一次；失败不循环重试。关闭托盘仅移除图标，不停止核心或任务。后端正常退出或通信管道关闭会清理托盘进程。托盘仅支持 HTTP 回环地址；端口沿用后端实际监听端口。`NULAS_PYTHON` 可指定解释器（Windows 默认 `python`，其他平台默认 `python3`），`NULAS_TRAY_SCRIPT` 可指定脚本路径（默认相对后端目录 `../scripts/tray.py`）。辅助进程不接收 Mihomo 控制接口凭据。
+
+系统代理、虚拟网卡和开机自启的最后请求偏好也保存在同一原子状态文件中，不依赖浏览器。代理/TUN 偏好随任务入队一起保存，自启偏好在系统操作前保存；执行失败仍保留请求偏好和可见失败。实际开关状态始终从系统/核心读取，说明中可查看与保存偏好的差异。旧状态文件无对应字段时表示尚未保存选择，不覆盖原配置。
+
+保存开启偏好不意味着自动接管网络：重启不重放系统代理/TUN 操作，TUN 仍默认关闭；队列任务继续遵守待执行可恢复、执行中标记失败的规则。系统代理的原设置备份和端口持久保存以供恢复；自启实际注册由 systemd 持久保存。完整配置应用可能关闭 TUN，此时偏好与实际状态会有差异，需要手动开启。系统代理仍仅支持 Linux GNOME，TUN 与开机自启仍仅支持 Linux，跨平台托盘支持不改变这些边界。
+
+本次验证：前端类型检查、生产 SSR 构建、Go vet、Python 测试、托盘辅助进程协议/生命周期与开关持久化 race 测试，以及 Linux amd64、Windows amd64、macOS arm64 的 Go 构建通过。浏览器已验证托盘启动失败提示、重试入口和刷新后偏好保留。完整 Go race 测试中 `TestManagedCoreLifecycle`、`TestManagedCorePortConflict` 受本机 9090 端口已占用影响，`TestTUNDisableOnlyPatchesTUNAndVerifies`、`TestTUNFailedListenerCreationRollsBack` 受本机已有 Nulas TUN 网卡影响；排除这四项后其余测试通过。未改动现存服务或网卡。当前环境未安装 pystray，三平台真实托盘显示/菜单未实测，交叉编译不代表原生桌面验收。

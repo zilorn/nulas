@@ -16,6 +16,12 @@ Nulas is a browser-based quick configuration dashboard for https://github.com/Me
 - `python3 -m unittest discover -s scripts`: verify runtime asset selection and extraction.
 - `cd backend && go build -o ../bin/nulas .`: build the backend.
 
+## Cross-platform desktop support and saved settings
+- Desktop tray integration must support Windows, macOS and Linux without replacing the browser frontend. Keep native event loops on the main thread, avoid shell-specific launch assumptions, and document desktop/session dependencies. Linux requires a tray host and GTK/AppIndicator; headless services cannot display a tray. Unsupported features must show their actual limitations (system proxy is currently Linux GNOME; TUN and startup management are currently Linux only).
+- Store user switch preferences (tray, system proxy, TUN and startup) in the backend's atomic `state.json`, never solely in browser storage. Persist network switch intent together with the durable job before executing side effects, and startup intent before invoking system tools. Preserve older state files; absent preferences mean no recorded choice.
+- Saved preferences and observed runtime state are separate. Read back system/core state, expose mismatch/failure, and never show saved intent as confirmed success. Restore the optional tray on backend startup, but do not automatically replay system proxy/TUN operations on restart; TUN starts disabled. Startup registration remains persisted by the OS. Keep proxy recovery snapshots until restoration succeeds; failure to persist must prevent new external actions.
+- Optional tray dependencies: `python3 -m pip install -r scripts/requirements-tray.txt` (Windows: `python -m pip ...`). `NULAS_PYTHON` chooses the interpreter and `NULAS_TRAY_SCRIPT` chooses the helper path. Never auto-install desktop dependencies or change host networking for verification.
+
 ## Boundaries to preserve
 - Keep SolidStart; do not replace it with React or add Tauri browser dependencies.
 - Preserve the CLAUDE.md symlink to this file.

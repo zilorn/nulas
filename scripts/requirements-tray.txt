@@ -1,0 +1,3 @@
+# Optional desktop integration; platform dependencies are selected by pystray.
+pystray==0.19.5
+Pillow>=10.4,<13
