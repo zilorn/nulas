@@ -58,23 +58,25 @@ type State struct {
 	ProxyPort   int               `json:"proxyPort,omitempty"`
 }
 type App struct {
-	mu                      sync.Mutex
-	trayMu                  sync.Mutex
-	tray                    *trayProcess
-	trayError               string
-	trayContext             context.Context
-	trayURL                 string
-	controlMu               sync.Mutex
-	state                   State
-	dir, controller, secret string
-	wake                    chan struct{}
-	client                  *http.Client
-	delaySlots              chan struct{}
-	managedContext          context.Context
-	coreCommand             *exec.Cmd
-	coreDone                chan struct{}
-	coreRuntime             CoreStatus
-	systemCommand           func(context.Context, string, ...string) (string, error)
+	updateHome, updateScript, runningRelease string
+	updateCommand                            cliRunner
+	mu                                       sync.Mutex
+	trayMu                                   sync.Mutex
+	tray                                     *trayProcess
+	trayError                                string
+	trayContext                              context.Context
+	trayURL                                  string
+	controlMu                                sync.Mutex
+	state                                    State
+	dir, controller, secret                  string
+	wake                                     chan struct{}
+	client                                   *http.Client
+	delaySlots                               chan struct{}
+	managedContext                           context.Context
+	coreCommand                              *exec.Cmd
+	coreDone                                 chan struct{}
+	coreRuntime                              CoreStatus
+	systemCommand                            func(context.Context, string, ...string) (string, error)
 }
 
 func validate(c Config) error {
@@ -128,6 +130,7 @@ func newApp(dir, controller, secret string) (*App, error) {
 		return nil, err
 	}
 	a := &App{dir: dir, controller: strings.TrimRight(controller, "/"), secret: secret, wake: make(chan struct{}, 1), client: &http.Client{Timeout: 20 * time.Second}, delaySlots: make(chan struct{}, 4)}
+	a.configureUpdates()
 	a.state = State{Config: Config{7890, "rule", false, false, "info"}, Jobs: []Job{}}
 	b, err := os.ReadFile(filepath.Join(dir, "state.json"))
 	if err == nil {
@@ -150,6 +153,9 @@ func newApp(dir, controller, secret string) (*App, error) {
 		if a.state.Jobs[i].Status == "running" {
 			a.state.Jobs[i].Status = "failed"
 			a.state.Jobs[i].Message = "Backend interrupted; inspect core state before retrying"
+			if isAppUpdate(a.state.Jobs[i].Action) {
+				a.state.Jobs[i].Message = "更新被服务重启中断；请检查安装状态与目录锁后手动重试，不会自动重放"
+			}
 			if a.state.Jobs[i].Action == "refresh-profile" {
 				for k := range a.state.Profiles {
 					if a.state.Profiles[k].ID == a.state.Jobs[i].ProfileID {
@@ -192,6 +198,7 @@ func (a *App) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/", frontendHandler())
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, errors.New("unknown API endpoint")) })
+	a.registerUpdates(mux)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -362,6 +369,9 @@ func (a *App) handler() http.Handler {
 	})
 }
 func (a *App) runJob(j Job) error {
+	if isAppUpdate(j.Action) {
+		return a.runAppUpdate(j)
+	}
 	if j.Action == "switch-core" {
 		return a.switchCore(j)
 	}
@@ -443,6 +453,9 @@ func (a *App) process() bool {
 	}
 	a.state.Jobs[idx].Status = "running"
 	a.state.Jobs[idx].Message = "Processing configuration"
+	if isAppUpdate(a.state.Jobs[idx].Action) {
+		a.state.Jobs[idx].Message = "正在后台执行 Nulas 更新操作"
+	}
 	if e := a.persist(); e != nil {
 		a.state.Jobs[idx].Status = "queued"
 		a.mu.Unlock()
@@ -492,6 +505,12 @@ func (a *App) process() bool {
 	if j.Action == "proxy-disable" {
 		a.state.Jobs[idx].Message = "原系统代理设置已恢复并检查"
 	}
+	if isAppUpdate(j.Action) {
+		a.state.Jobs[idx].Message = "更新检查完成"
+		if j.Action == "update-app" {
+			a.state.Jobs[idx].Message = "更新安装完成；如版本已切换，请重启 Nulas 后生效"
+		}
+	}
 	if err != nil {
 		a.state.Jobs[idx].Status = "failed"
 		a.state.Jobs[idx].Message = err.Error()
@@ -523,6 +542,9 @@ func (a *App) process() bool {
 		a.state.Profiles = previousProfiles
 		a.state.Jobs[idx].Status = "failed"
 		a.state.Jobs[idx].Message = "内核已执行操作，但保存结果失败；请检查内核状态后重试"
+		if isAppUpdate(j.Action) {
+			a.state.Jobs[idx].Message = "更新操作已执行，但保存任务结果失败；请检查安装状态"
+		}
 		if j.Action == "refresh-profile" {
 			a.state.Jobs[idx].Message = "保存更新结果失败，已保留原配置"
 			for i := range a.state.Profiles {

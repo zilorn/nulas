@@ -255,6 +255,11 @@ def update(home, check=False):
         latest = command('git', 'rev-parse', 'FETCH_HEAD', cwd=source, capture=True)
         current = metadata['commit']
         print(f'Installed: {current}\nLatest:    {latest}', flush=True)
+        # Reject history rewrites before persisting discovery for the sidebar.
+        command('git', 'merge-base', '--is-ancestor', current, latest, cwd=source)
+        metadata['latest'] = latest
+        metadata['checked'] = time.time()
+        atomic_json(home / 'installation.json', metadata)
         if latest == current:
             if metadata.get('error'):
                 metadata['error'] = None
@@ -263,8 +268,6 @@ def update(home, check=False):
                 launchers(home)
             print('Nulas is up to date.', flush=True)
             return
-        # Reject remote history rewrites instead of silently downgrading/diverging.
-        command('git', 'merge-base', '--is-ancestor', current, latest, cwd=source)
         print('Update available.', flush=True)
         if not check:
             stage(home, metadata, latest)

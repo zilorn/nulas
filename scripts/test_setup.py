@@ -155,6 +155,9 @@ class SetupTests(unittest.TestCase):
             with patch.object(setup, 'build') as build:
                 setup.update(home, check=True)
                 build.assert_not_called()
+                self.assertEqual(setup.load(home)["latest"], second)
+                self.assertGreater(setup.load(home)["checked"], 0)
+                self.assertEqual(setup.load(home)["commit"], first)
                 setup.update(home)
             self.assertEqual(setup.load(home)['commit'], second)
             self.assertEqual((Path(setup.load(home)['current']) / 'file').read_text(), 'second')

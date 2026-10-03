@@ -1,4 +1,5 @@
 import { createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import AppUpdates from "./AppUpdates";
 import { api } from "../lib/api";
 
 function SidebarIcon(props: { children: JSX.Element; brand?: boolean }) {
@@ -19,6 +20,7 @@ export default function Workspace(props: { page: "quick" | "profiles" | "tasks" 
   <a class="nav" classList={{active:props.page==="nodes"}} href="/nodes"><SidebarIcon><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v5M5 17v-5h14v5"/></SidebarIcon><span>节点管理</span></a>
   <a class="nav" classList={{active:props.page==="core"}} href="/core"><SidebarIcon><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></SidebarIcon><span>内核管理</span></a>
   <a class="nav" classList={{active:props.page==="tasks"}} href="/tasks"><SidebarIcon><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></SidebarIcon><span>后台任务</span></a>
+  <AppUpdates />
   <div class="sidebar-note">为更快的配置而构建<p>SolidStart + Go<br/>Mihomo compatible</p></div>
  </aside><main><header><span>工作空间 / {({quick:"概览",profiles:"配置管理",nodes:"节点管理",tasks:"后台任务",core:"内核管理"})[props.page]}</span><span class="connection" classList={{online:props.online ?? online()}}>● {(props.online ?? online())?"后端已连接":"后端未连接"}</span></header>{props.children}<footer>
   <div class="footer-project">NULAS / 本地配置工作空间
