@@ -282,3 +282,9 @@ macOS/Windows 使用 pystray 原生后端；Linux 需要 GTK/AppIndicator 的 Py
 - `deploy/`：可选的 systemd 服务模板（未自动安装）。
 
 项目名称保持 Nulas，遵循上游 README 对非官方下游项目命名的要求。若未来引入上游源码，请保留上游许可与版权声明。
+
+### 内核管理
+
+打开侧边栏「内核管理」（`/core`），可分页查看 [Mihomo 官方稳定版本](https://github.com/MetaCubeX/mihomo/releases)、查看发布说明、切换到历史版本，或一键更新到最新稳定版。需要 GitHub 网络访问；请求限额、平台不支持、缺少 SHA256 或下载校验失败会显示失败结果。仅支持 Nulas 生产入口启动的托管内核，外部控制器需自行管理。
+
+操作先保存明确版本的后台任务，再由单一后台 worker 下载、校验和重启，关闭页面不影响执行。版本存放在 `.runtime/core/versions/<tag>/`，通过原子写入的 `active-version` 选择；旧的 `.runtime/core/mihomo` 与用户配置保留，已下载的版本可复用。启动及控制接口检查失败时尝试恢复原版本，恢复失败会显示实际错误。重启会短暂中断连接，加载最后成功应用的配置，TUN 保持关闭，需手动重新开启；不会修改系统代理设置。重启 Nulas 后，中断的运行任务标记为失败，不自动重放；等待中的任务可以继续。

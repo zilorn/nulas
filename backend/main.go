@@ -31,15 +31,16 @@ type Config struct {
 	Log  string `json:"log-level"`
 }
 type Job struct {
-	ID         string    `json:"id"`
-	Action     string    `json:"action"`
-	Status     string    `json:"status"`
-	Message    string    `json:"message"`
-	Created    time.Time `json:"created"`
-	Config     Config    `json:"config"`
-	ProfileID  string    `json:"profileId,omitempty"`
-	Document   string    `json:"document,omitempty"`
-	RefreshURL string    `json:"refreshURL,omitempty"`
+	CoreVersion string    `json:"coreVersion,omitempty"`
+	ID          string    `json:"id"`
+	Action      string    `json:"action"`
+	Status      string    `json:"status"`
+	Message     string    `json:"message"`
+	Created     time.Time `json:"created"`
+	Config      Config    `json:"config"`
+	ProfileID   string    `json:"profileId,omitempty"`
+	Document    string    `json:"document,omitempty"`
+	RefreshURL  string    `json:"refreshURL,omitempty"`
 }
 type Preferences struct {
 	Tray    bool  `json:"tray"`
@@ -201,6 +202,9 @@ func (a *App) handler() http.Handler {
 		reply(w, 200, a.coreStatus())
 	})
 	mux.HandleFunc("POST /api/core/ensure", a.ensureCore)
+	mux.HandleFunc("GET /api/core/releases", a.coreReleases)
+	mux.HandleFunc("GET /api/core/management", a.coreManagement)
+	mux.HandleFunc("POST /api/core/switch", a.queueCoreSwitch)
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -357,6 +361,9 @@ func (a *App) handler() http.Handler {
 	})
 }
 func (a *App) runJob(j Job) error {
+	if j.Action == "switch-core" {
+		return a.switchCore(j)
+	}
 	if j.Action == "proxy-enable" || j.Action == "proxy-disable" {
 		return a.setSystemProxy(j.Action == "proxy-enable")
 	}
@@ -462,6 +469,9 @@ func (a *App) process() bool {
 		if a.managedContext != nil {
 			a.state.Jobs[idx].Message = "Mihomo core started and controller verified"
 		}
+	}
+	if j.Action == "switch-core" {
+		a.state.Jobs[idx].Message = "内核已切换至 " + j.CoreVersion + "，启动与控制接口检查通过"
 	}
 	if j.Action == "apply" {
 		a.state.Jobs[idx].Message = "Runtime settings applied to Mihomo"

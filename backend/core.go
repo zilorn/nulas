@@ -25,9 +25,21 @@ func corePath() string {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	return filepath.Join(env("NULAS_CORE_DIR", "../.runtime/core"), name)
+	dir := env("NULAS_CORE_DIR", "../.runtime/core")
+	tag, _ := os.ReadFile(filepath.Join(dir, "active-version"))
+	if stableCoreTag.Match(tag) {
+		dir = filepath.Join(dir, "versions", string(tag))
+	}
+	return filepath.Join(dir, name)
 }
 func coreInstalled() (bool, error) {
+	tag, pointerErr := os.ReadFile(filepath.Join(env("NULAS_CORE_DIR", "../.runtime/core"), "active-version"))
+	if pointerErr != nil && !os.IsNotExist(pointerErr) {
+		return false, pointerErr
+	}
+	if len(tag) > 0 && !stableCoreTag.Match(tag) {
+		return false, errors.New("Invalid active core version")
+	}
 	info, err := os.Stat(corePath())
 	if os.IsNotExist(err) {
 		return false, nil
@@ -49,7 +61,7 @@ func (a *App) coreStatus() CoreStatus {
 	}
 	for i := len(a.state.Jobs) - 1; i >= 0; i-- {
 		j := a.state.Jobs[i]
-		if j.Action != "install-core" {
+		if j.Action != "install-core" && j.Action != "switch-core" {
 			continue
 		}
 		if j.Status == "queued" || j.Status == "running" {
