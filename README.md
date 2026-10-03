@@ -1,5 +1,7 @@
 # Nulas
 
+**简体中文** · [English](README.en.md)
+
 基于 [MetaCubeX/mihomo · Meta](https://github.com/MetaCubeX/mihomo/tree/Meta) 的网页快速配置面板。前端使用 **Vite + SolidStart 2（SSR）+ SolidJS + TypeScript**，后端使用 **Go** 标准库，通过 Mihomo REST API 读取并修改核心运行参数。Nulas 是非官方下游项目，不复制上游源码，不捆绑内核二进制。
 
 ## 介绍

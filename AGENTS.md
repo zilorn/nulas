@@ -39,3 +39,4 @@ Run relevant checks and document any unavailable verification. Commit completed 
 ## Localization
 - Use the project skill `skills/nulas-i18n/SKILL.md` when adding interface copy or changing language support. Keep Chinese and English translations, accessibility labels and locale-aware dates in sync.
 - `cd web && pnpm test:i18n`: verify locale selection, translation coverage and interpolation.
+- Keep `README.md` (Simplified Chinese) and `README.en.md` in sync when documentation changes; each starts with a language link to the other and the English one follows the terminology used in `web/src/lib/locales/en.ts`.
