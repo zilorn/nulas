@@ -144,6 +144,12 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, map[string]any{"status": "ok", "controllerConfigured": a.controller != ""})
 	})
+	mux.HandleFunc("GET /api/core", func(w http.ResponseWriter, r *http.Request) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		reply(w, 200, a.coreStatus())
+	})
+	mux.HandleFunc("POST /api/core/ensure", a.ensureCore)
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -184,7 +190,7 @@ func (a *App) handler() http.Handler {
 			fail(w, 400, e)
 			return
 		}
-		if body.Action != "generate" && body.Action != "apply" {
+		if body.Action != "generate" && body.Action != "apply" && body.Action != "install-core" {
 			fail(w, 400, errors.New("invalid action"))
 			return
 		}
@@ -242,6 +248,9 @@ func (a *App) handler() http.Handler {
 	})
 }
 func (a *App) runJob(j Job) error {
+	if j.Action == "install-core" {
+		return a.installCore()
+	}
 	b, e := json.MarshalIndent(j.Config, "", "  ")
 	if e != nil {
 		return e
@@ -299,6 +308,9 @@ func (a *App) process() bool {
 	defer a.mu.Unlock()
 	a.state.Jobs[idx].Status = "succeeded"
 	a.state.Jobs[idx].Message = "Configuration generated"
+	if j.Action == "install-core" {
+		a.state.Jobs[idx].Message = "Mihomo core installed; start it separately"
+	}
 	if j.Action == "apply" {
 		a.state.Jobs[idx].Message = "Runtime settings applied to Mihomo"
 	}

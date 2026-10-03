@@ -106,3 +106,9 @@ pnpm build
 已验证 TypeScript 检查、pnpm 静态构建、Go 测试（含 race 检测）、Go vet、Go 托管页面，以及浏览器保存配置、后台生成和刷新后的持久化。内核应用使用模拟控制接口测试；未操作本机实际 Mihomo 实例。按需下载脚本已测试平台选择与解压，核实官方 Release 文件名和摘要，未下载或执行实际内核。
 
 当前 SolidStart 1.x / Vinxi 依赖审计存在 14 条传递依赖告警（11 high、3 moderate）；兼容范围内自动修复未消除，强制修复建议会破坏框架版本。生产只发布静态文件，由 Go 托管，不运行 Nitro/Vinxi 服务；开发服务器保持本机使用，后续需跟进框架更新。
+
+### Automatic core installation
+
+Opening the dashboard checks the local executable and queues installation when missing. The Go worker runs the official checksum-verifying Python downloader; closing the browser does not cancel it. Python 3 and GitHub access are required. Status and failures appear on the dashboard and in durable job history. Failed or interrupted installations require explicit retry. Existing files are preserved. Installation does not start Mihomo or change system networking; configure `MIHOMO_CONTROLLER` separately.
+
+When launched from `backend/`, paths default to `../.runtime/core` and `../scripts/install_core.py`. Override `NULAS_CORE_DIR`, `NULAS_CORE_INSTALLER`, and `NULAS_PYTHON` for other deployment layouts.
