@@ -173,3 +173,96 @@ func TestWriteOriginProtection(t *testing.T) {
 		t.Fatal("runtime write bypassed origin guard")
 	}
 }
+
+func TestNodeDelay(t *testing.T) {
+	const name = "节点 / 香港?#%"
+	for _, tc := range []struct {
+		name, response         string
+		coreStatus, wantStatus int
+	}{
+		{"success", `{"delay":123,"secret":"must-not-leak"}`, 200, 200},
+		{"timeout", `{"message":"private-core-detail"}`, 504, 502},
+		{"unreachable", `{}`, 503, 502},
+		{"invalid JSON", `invalid`, 200, 502},
+		{"missing delay", `{}`, 200, 502},
+		{"zero delay", `{"delay":0}`, 200, 502},
+		{"negative delay", `{"delay":-1}`, 200, 502},
+		{"oversized delay", `{"delay":65536}`, 200, 502},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			probes := 0
+			core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer test-secret" {
+					t.Error("missing server-side credential")
+				}
+				if r.Method != "GET" {
+					t.Error("probe changed core state")
+				}
+				switch r.URL.Path {
+				case "/proxies":
+					reply(w, 200, map[string]any{"proxies": map[string]any{name: map[string]string{"type": "Vless"}, "REJECT": map[string]string{"type": "Reject"}, "PASS": map[string]string{"type": "Pass"}, "DROP": map[string]string{"type": "RejectDrop"}}})
+				case "/proxies/" + name + "/delay":
+					probes++
+					if r.URL.Query().Get("url") != "https://www.gstatic.com/generate_204" || r.URL.Query().Get("timeout") != "5000" || r.URL.Query().Get("expected") != "204" {
+						t.Errorf("invalid probe query: %s", r.URL.RawQuery)
+					}
+					w.WriteHeader(tc.coreStatus)
+					w.Write([]byte(tc.response))
+				default:
+					t.Errorf("unexpected request: %s", r.URL)
+				}
+			}))
+			defer core.Close()
+			a := testApp(t, core.URL)
+			for _, body := range []string{`{}`, `{"name":"missing"}`, `{"name":"REJECT"}`, `{"name":"PASS"}`, `{"name":"DROP"}`, `{"name":"` + strings.Repeat("a", 1025) + `"}`, `{"name":"x","url":"http://private.example"}`} {
+				if w := request(a, "POST", "/api/nodes/delay", body); w.Code != 400 {
+					t.Fatalf("invalid probe accepted: %d %s", w.Code, w.Body.String())
+				}
+			}
+			if probes != 0 {
+				t.Fatal("invalid probe reached delay endpoint")
+			}
+			body, _ := json.Marshal(map[string]string{"name": name})
+			w := request(a, "POST", "/api/nodes/delay", string(body))
+			if w.Code != tc.wantStatus || probes != 1 {
+				t.Fatalf("status=%d probes=%d body=%s", w.Code, probes, w.Body.String())
+			}
+			if strings.Contains(w.Body.String(), "must-not-leak") || strings.Contains(w.Body.String(), "private-core-detail") {
+				t.Fatal("core details leaked")
+			}
+			if tc.wantStatus == 200 {
+				var result struct {
+					Name  string `json:"name"`
+					Delay int    `json:"delay"`
+				}
+				if json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Name != name || result.Delay != 123 {
+					t.Fatal(w.Body.String())
+				}
+			}
+			if len(a.delaySlots) != 0 {
+				t.Fatal("probe slot leaked")
+			}
+			for i := 0; i < cap(a.delaySlots); i++ {
+				a.delaySlots <- struct{}{}
+			}
+			if w := request(a, "POST", "/api/nodes/delay", string(body)); w.Code != 429 {
+				t.Fatal("probe concurrency limit not enforced")
+			}
+		})
+	}
+	if w := request(testApp(t, ""), "POST", "/api/nodes/delay", `{"name":"node"}`); w.Code != 502 {
+		t.Fatal("missing controller failure hidden")
+	}
+}
+
+func TestNodeDelayOriginProtection(t *testing.T) {
+	a := testApp(t, "")
+	r := httptest.NewRequest("POST", "http://localhost/api/nodes/delay", strings.NewReader(`{"name":"node"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Origin", "http://evil.example")
+	w := httptest.NewRecorder()
+	a.handler().ServeHTTP(w, r)
+	if w.Code != 403 {
+		t.Fatal("delay probe bypassed origin guard")
+	}
+}

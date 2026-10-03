@@ -12,3 +12,7 @@ export function visibleGroups(nodes: Proxy[], mode: string, fallbackTarget?: str
 export function canChoose(group: Proxy, mode: string): boolean {
  return group.type === "Selector" && visibleGroups([group], mode).length > 0;
 }
+
+export function canTest(proxy: Proxy | undefined): boolean {
+ return !!proxy && !["Reject", "RejectDrop", "Pass"].includes(proxy.type);
+}

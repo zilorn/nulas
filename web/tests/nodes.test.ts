@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canChoose, visibleGroups, type Proxy } from "../src/lib/nodes.ts";
+import { canChoose, canTest, visibleGroups, type Proxy } from "../src/lib/nodes.ts";
 
 const nodes: Proxy[] = [
  { name: "ChatGPT", type: "Selector", all: ["海外使用"] },
@@ -47,4 +47,10 @@ test("MATCH targets do not change other modes", () => {
  for (const mode of ["direct", "", "unknown"]) {
   assert.deepEqual(visibleGroups(nodes, mode, "海外使用"), []);
  }
+});
+
+test("latency tests allow nodes and strategy groups but exclude rejecting and pass routes", () => {
+ for (const type of ["Vless", "Direct", "Selector", "URLTest", "Fallback"]) assert.equal(canTest({ name: "node", type }), true);
+ for (const type of ["Reject", "RejectDrop", "Pass"]) assert.equal(canTest({ name: "node", type }), false);
+ assert.equal(canTest(undefined), false);
 });

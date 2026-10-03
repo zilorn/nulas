@@ -29,3 +29,5 @@
 .nav-icon{width:20px;height:20px;flex-shrink:0;display:block}
 .brand-icon{width:32px;height:32px;flex-shrink:0;display:block}
 @media(max-width:700px){.nav{gap:6px}.nav-icon{width:18px;height:18px}.brand-icon{width:26px;height:26px}}
+
+.node-card{min-width:0;display:flex;flex-direction:column}.node-card>.node-tile{width:100%;flex:1}.node-test-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 4px;color:#20785c;font-size:12px}.node-test-button{padding:5px 10px;font-size:11px}.node-delay-failed,.node-test-error{color:#b0523d}.node-test-error{display:block;padding:0 4px 8px;overflow-wrap:anywhere;font-size:11px;line-height:1.6}.node-test-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.node-test-toolbar>span,.node-test-hint{font-size:11px;color:#71877b}

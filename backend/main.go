@@ -69,6 +69,7 @@ type App struct {
 	dir, controller, secret string
 	wake                    chan struct{}
 	client                  *http.Client
+	delaySlots              chan struct{}
 	managedContext          context.Context
 	coreCommand             *exec.Cmd
 	coreDone                chan struct{}
@@ -126,7 +127,7 @@ func newApp(dir, controller, secret string) (*App, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	a := &App{dir: dir, controller: strings.TrimRight(controller, "/"), secret: secret, wake: make(chan struct{}, 1), client: &http.Client{Timeout: 20 * time.Second}}
+	a := &App{dir: dir, controller: strings.TrimRight(controller, "/"), secret: secret, wake: make(chan struct{}, 1), client: &http.Client{Timeout: 20 * time.Second}, delaySlots: make(chan struct{}, 4)}
 	a.state = State{Config: Config{7890, "rule", false, false, "info"}, Jobs: []Job{}}
 	b, err := os.ReadFile(filepath.Join(dir, "state.json"))
 	if err == nil {

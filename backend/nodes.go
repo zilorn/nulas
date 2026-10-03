@@ -77,6 +77,50 @@ func (a *App) proxies(ctx context.Context) (map[string]Proxy, error) {
 	return data.Proxies, err
 }
 func (a *App) nodeRoutes(mux *http.ServeMux) {
+	// A latency probe is transient and never changes selection or saved configuration.
+	mux.HandleFunc("POST /api/nodes/delay", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := decode(w, r, &body); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		if body.Name == "" || len(body.Name) > 1024 {
+			fail(w, 400, errors.New("请选择有效的测速节点"))
+			return
+		}
+		select {
+		case a.delaySlots <- struct{}{}:
+			defer func() { <-a.delaySlots }()
+		default:
+			fail(w, 429, errors.New("测速请求过多，请稍后重试"))
+			return
+		}
+		proxies, err := a.proxies(r.Context())
+		if err != nil {
+			fail(w, 502, err)
+			return
+		}
+		proxy, ok := proxies[body.Name]
+		if !ok || proxy.Type == "Reject" || proxy.Type == "RejectDrop" || proxy.Type == "Pass" {
+			fail(w, 400, errors.New("该节点不存在或不支持测速，请刷新列表"))
+			return
+		}
+		var result struct {
+			Delay *int `json:"delay"`
+		}
+		query := url.Values{"url": {"https://www.gstatic.com/generate_204"}, "timeout": {"5000"}, "expected": {"204"}}
+		if err := a.controllerRequest(r.Context(), "GET", "/proxies/"+url.PathEscape(body.Name)+"/delay?"+query.Encode(), nil, &result); err != nil {
+			fail(w, 502, fmt.Errorf("测速失败（超时或目标不可达）：%w", err))
+			return
+		}
+		if result.Delay == nil || *result.Delay <= 0 || *result.Delay > 65535 {
+			fail(w, 502, errors.New("内核未返回有效的测速延迟"))
+			return
+		}
+		reply(w, 200, map[string]any{"name": body.Name, "delay": *result.Delay})
+	})
 	mux.HandleFunc("GET /api/runtime/fallback", func(w http.ResponseWriter, r *http.Request) {
 		var data struct {
 			Rules []struct {

@@ -1,7 +1,7 @@
-import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import Workspace from "../components/Workspace";
 import { api } from "../lib/api";
-import { canChoose, visibleGroups, type Proxy } from "../lib/nodes";
+import { canChoose, canTest, visibleGroups, type Proxy } from "../lib/nodes";
 
 const modes: Record<string, string> = { rule: "规则模式", global: "全局模式", direct: "直连模式" };
 
@@ -17,6 +17,44 @@ export default function Nodes() {
  const [switching, setSwitching] = createSignal<{ group: string; name: string }>();
  const [fallback, setFallback] = createSignal<{ target: string; configured: boolean }>();
  const [fallbackError, setFallbackError] = createSignal("");
+ const [testing, setTesting] = createSignal(false);
+ const [progress, setProgress] = createSignal({ done: 0, total: 0 });
+ const [delays, setDelays] = createSignal<Record<string, { status: "waiting" | "testing" | "done" | "failed"; delay?: number; error?: string; time?: string }>>({});
+ let testController: AbortController | undefined;
+ onCleanup(() => testController?.abort());
+
+ async function testNodes(names: string[]) {
+  if (busy() || testing() || !ready()) return;
+  const targets = [...new Set(names)].filter(name => canTest(nodes().find(p => p.name === name)));
+  if (!targets.length) return;
+  const controller = new AbortController();
+  testController = controller;
+  setTesting(true); setProgress({ done: 0, total: targets.length });
+  setDelays(previous => ({ ...previous, ...Object.fromEntries(targets.map(name => [name, { status: "waiting" as const }])) }));
+  let index = 0;
+  async function worker() {
+   while (index < targets.length && !controller.signal.aborted) {
+    const name = targets[index++];
+    setDelays(previous => ({ ...previous, [name]: { status: "testing" } }));
+    try {
+     const result = await api<{ name: string; delay: number }>("nodes/delay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }), signal: controller.signal });
+     if (!controller.signal.aborted) setDelays(previous => ({ ...previous, [name]: { status: "done", delay: result.delay, time: new Date().toLocaleTimeString() } }));
+    } catch (e) {
+     if (!controller.signal.aborted) setDelays(previous => ({ ...previous, [name]: { status: "failed", error: (e as Error).message } }));
+    } finally {
+     if (!controller.signal.aborted) setProgress(previous => ({ ...previous, done: previous.done + 1 }));
+    }
+   }
+  }
+  try { await Promise.all(Array.from({ length: Math.min(4, targets.length) }, worker)); }
+  finally { if (!controller.signal.aborted) setTesting(false); }
+ }
+
+ const delayLabel = (name: string) => {
+  const value = delays()[name];
+  if (!value) return "未测速";
+  return value.status === "waiting" ? "等待测速" : value.status === "testing" ? "测速中…" : value.status === "failed" ? "测速失败" : `${value.delay} ms`;
+ };
 
  async function refreshFallback() {
   setFallback(undefined); setFallbackError("");
@@ -25,11 +63,11 @@ export default function Nodes() {
  }
 
  async function refresh() {
-  if (busy()) return;
+  if (busy() || testing()) return;
   setBusy(true); setError(""); setNotice("");
   try {
    const [list, runtime] = await Promise.all([api<Proxy[]>("nodes"), api<{ mode: string }>("runtime/mode")]);
-   setNodes(list); setMode(runtime.mode); setReady(true);
+   setNodes(list); setDelays({}); setProgress({ done: 0, total: 0 }); setMode(runtime.mode); setReady(true);
    if (runtime.mode === "rule") await refreshFallback();
   } catch (e) { setReady(false); setError((e as Error).message); }
   finally { setBusy(false); }
@@ -37,7 +75,7 @@ export default function Nodes() {
  onMount(() => void refresh());
 
  async function changeMode(value: string) {
-  if (busy() || value === mode()) return;
+  if (busy() || testing() || value === mode()) return;
   setBusy(true); setNotice(""); setError("");
   try {
    const result = await api<{ mode: string }>("runtime/mode", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: value }) });
@@ -50,7 +88,7 @@ export default function Nodes() {
  }
 
  async function choose(group: Proxy, name: string) {
-  if (busy() || !ready() || !canChoose(group, mode()) || group.now === name) return;
+  if (busy() || testing() || !ready() || !canChoose(group, mode()) || group.now === name) return;
   setBusy(true); setSwitching({ group: group.name, name }); setError(""); setNotice("");
   try {
    await api("nodes/selection", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ group: group.name, name }) });
@@ -70,15 +108,15 @@ export default function Nodes() {
  const pending = (group: Proxy, name: string) => switching()?.group === group.name && switching()?.name === name;
 
  return <Workspace page="nodes">
-  <section class="intro"><div><span class="eyebrow">PROXY NODES</span><h1>节点管理<span>，点选即切换。</span></h1><p>选择代理组，点击节点卡片即可使用。当前使用的节点会保持高亮。</p></div><button class="secondary" disabled={busy()} onClick={() => void refresh()}>{busy() ? "正在处理…" : "刷新节点与模式"}</button></section>
+  <section class="intro"><div><span class="eyebrow">PROXY NODES</span><h1>节点管理<span>，点选即切换。</span></h1><p>选择代理组，点击节点卡片即可使用。当前使用的节点会保持高亮。</p></div><button class="secondary" disabled={busy() || testing()} onClick={() => void refresh()}>{busy() ? "正在处理…" : "刷新节点与模式"}</button></section>
   <Show when={error()}><p class="error" role="alert">{error()}</p></Show>
   <Show when={notice()}><p class="success" role="status">{notice()}</p></Show>
   <section class="panel mode-panel">
    <div class="panel-heading"><div><h2>内核运行模式</h2><p>当前模式：{modes[mode()] || "未连接"}。切换立即生效。</p></div></div>
-   <div class="mode-options"><For each={Object.entries(modes)}>{([value, label]) => <button class={mode() === value ? "" : "secondary"} aria-pressed={mode() === value} disabled={busy() || !ready()} onClick={() => void changeMode(value)}>{label}<small>{({ rule: "按内核规则选择出站", global: "使用 GLOBAL 组选择的节点", direct: "全部流量直接连接" } as Record<string, string>)[value]}</small></button>}</For></div>
+   <div class="mode-options"><For each={Object.entries(modes)}>{([value, label]) => <button class={mode() === value ? "" : "secondary"} aria-pressed={mode() === value} disabled={busy() || testing() || !ready()} onClick={() => void changeMode(value)}>{label}<small>{({ rule: "按内核规则选择出站", global: "使用 GLOBAL 组选择的节点", direct: "全部流量直接连接" } as Record<string, string>)[value]}</small></button>}</For></div>
    <p>节点和模式切换作用于当前内核；重启或重新加载配置后可能恢复原配置。</p>
    <Show when={ready() && mode() === "rule"}>
-    <div class="rule-fallback"><div><h3>未命中规则时的出口</h3><Show when={fallback()} fallback={<p role="status">{fallbackError() || "正在读取兜底规则…"}</p>}>{value => <><p><span class="rule-fallback-route">{value().configured ? "未命中前面的规则时，按 MATCH 规则路由到：" : "未配置有效 MATCH 规则；所有规则均未命中时，内核默认直连："}<strong>{value().target}</strong></span><Show when={fallbackGroup()?.now}><span class="rule-fallback-current">当前选择：{fallbackGroup()?.now}</span></Show></p><small>{fallbackGroup() ? "可进入此代理组选择成员；自动策略由内核选择。" : "此出口由内核规则配置决定。更改兜底目标需修改配置中的 MATCH 规则后重新应用。"}</small></>}</Show></div><Show when={fallbackGroup()}><button class="secondary" disabled={busy()} onClick={() => { setSearch(""); setActiveName(fallbackGroup()!.name); }}>查看兜底代理组</button></Show></div>
+    <div class="rule-fallback"><div><h3>未命中规则时的出口</h3><Show when={fallback()} fallback={<p role="status">{fallbackError() || "正在读取兜底规则…"}</p>}>{value => <><p><span class="rule-fallback-route">{value().configured ? "未命中前面的规则时，按 MATCH 规则路由到：" : "未配置有效 MATCH 规则；所有规则均未命中时，内核默认直连："}<strong>{value().target}</strong></span><Show when={fallbackGroup()?.now}><span class="rule-fallback-current">当前选择：{fallbackGroup()?.now}</span></Show></p><small>{fallbackGroup() ? "可进入此代理组选择成员；自动策略由内核选择。" : "此出口由内核规则配置决定。更改兜底目标需修改配置中的 MATCH 规则后重新应用。"}</small></>}</Show></div><Show when={fallbackGroup()}><button class="secondary" disabled={busy() || testing()} onClick={() => { setSearch(""); setActiveName(fallbackGroup()!.name); }}>查看兜底代理组</button></Show></div>
    </Show>
   </section>
   <section class="panel node-panel">
@@ -91,10 +129,12 @@ export default function Nodes() {
       <Show when={activeGroup()}>{group => <div class="node-browser" role="region" aria-label="节点列表" tabindex="0" aria-busy={!!switching()}>
        <div class="node-browser-heading"><div><h3>{group().name}</h3><p>{group().type === "Selector" ? "点击下方卡片，立即切换节点" : "由内核自动选择，以下节点仅供查看"}</p></div><span class="badge">{group().type === "Selector" ? "手动选择" : group().type}</span></div>
        <div class="node-current"><span class="node-current-dot" aria-hidden="true"/><div><small>当前使用</small><strong>{group().now || "由内核自动分配"}</strong></div></div>
+       <p class="node-test-hint">测速为连接延迟，并非下载带宽。目标：gstatic generate_204；超时 5 秒。代理组按当前策略测速，结果仅反映本次测试。</p>
+       <div class="node-test-toolbar"><button class="secondary" disabled={busy() || testing() || !members(group()).some(name => canTest(nodes().find(p => p.name === name)))} onClick={() => void testNodes(members(group()))}>{query() ? "测速搜索结果" : "测速当前组"}</button><span role="status">{testing() ? `正在测速 ${progress().done} / ${progress().total}` : progress().total ? `测速完成 ${progress().done} / ${progress().total}` : "支持单个节点或批量测速"}</span></div>
        <div class="node-list-heading"><span>{query() ? `找到 ${members(group()).length} / ${group().all?.length} 个节点 / 策略` : `${group().all?.length} 个节点 / 策略`}</span><Show when={query()}><button class="node-clear" onClick={() => setSearch("")}>清空搜索</button></Show></div>
-       <div class="node-grid"><For each={members(group())}>{name => <Show when={group().type === "Selector"} fallback={<div class="node-tile node-tile-readonly" classList={{ "is-current": group().now === name }}><span class="node-tile-name">{name}</span><span class="node-tile-meta"><span>{proxyTypes().get(name) || "代理"}</span><span>{group().now === name ? "✓ 当前使用" : "自动策略"}</span></span></div>}>
-        <button class="node-tile" classList={{ "is-current": group().now === name, "is-switching": pending(group(), name) }} aria-pressed={group().now === name} aria-label={`${name}，${group().now === name ? "当前使用" : "点击切换"}`} disabled={busy()} onClick={() => void choose(group(), name)}><span class="node-tile-name">{name}</span><span class="node-tile-meta"><span>{proxyTypes().get(name) || "代理"}</span><span>{pending(group(), name) ? "切换中…" : group().now === name ? "✓ 当前使用" : "点击使用 →"}</span></span></button>
-       </Show>}</For></div>
+       <div class="node-grid"><For each={members(group())}>{name => <div class="node-card"><Show when={group().type === "Selector"} fallback={<div class="node-tile node-tile-readonly" classList={{ "is-current": group().now === name }}><span class="node-tile-name">{name}</span><span class="node-tile-meta"><span>{proxyTypes().get(name) || "代理"}</span><span>{group().now === name ? "✓ 当前使用" : "自动策略"}</span></span></div>}>
+        <button class="node-tile" classList={{ "is-current": group().now === name, "is-switching": pending(group(), name) }} aria-pressed={group().now === name} aria-label={`${name}，${group().now === name ? "当前使用" : "点击切换"}`} disabled={busy() || testing()} onClick={() => void choose(group(), name)}><span class="node-tile-name">{name}</span><span class="node-tile-meta"><span>{proxyTypes().get(name) || "代理"}</span><span>{pending(group(), name) ? "切换中…" : group().now === name ? "✓ 当前使用" : "点击使用 →"}</span></span></button>
+       </Show><div class="node-test-row"><span classList={{ "node-delay-failed": delays()[name]?.status === "failed" }} title={delays()[name]?.error || (delays()[name]?.time ? `测试时间：${delays()[name].time}` : undefined)} aria-live="polite">{canTest(nodes().find(p => p.name === name)) ? delayLabel(name) : "不支持测速"}</span><button class="secondary node-test-button" aria-label={`测速 ${name}`} disabled={busy() || testing() || !canTest(nodes().find(p => p.name === name))} onClick={() => void testNodes([name])}>测速</button></div><Show when={delays()[name]?.error}><small class="node-test-error">{delays()[name]?.error}</small></Show></div>}</For></div>
       </div>}</Show>
      </div>
     </Show>
