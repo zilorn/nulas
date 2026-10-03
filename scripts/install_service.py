@@ -15,12 +15,17 @@ def unit_quote(value):
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
 
 
-def service_text(root, node):
+def service_text(root, node, installation=None):
+    start = ":/bin/bash " + unit_quote(str(root / "scripts/start.sh"))
+    if installation:
+        import json
+        metadata = json.loads((installation / "installation.json").read_text(encoding="utf-8"))
+        start = ":" + unit_quote(metadata["tools"]["python"]) + " " + unit_quote(str(installation / "bin/launcher.py")) + " run"
     return (MARKER + "[Unit]\nDescription=Nulas frontend and backend\n\n[Service]\n"
             + "Type=simple\nWorkingDirectory=" + unit_quote(str(root)) + "\n"
             + "Environment=" + unit_quote("PATH=" + str(Path(node).parent) + ":/usr/local/bin:/usr/bin:/bin") + "\n"
             + "EnvironmentFile=-%h/.config/nulas/service.env\n"
-            + "ExecStart=:/bin/bash " + unit_quote(str(root / "scripts/start.sh")) + "\n"
+            + "ExecStart=" + start + "\n"
             + "Restart=on-failure\nRestartSec=5\nTimeoutStopSec=30\nKillMode=control-group\n"
             + "\n[Install]\nWantedBy=default.target\n")
 
@@ -39,7 +44,8 @@ def main():
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and not path.read_text().startswith(MARKER):
         raise SystemExit("Refusing to overwrite an existing service not created by Nulas.")
-    content = service_text(root, node)
+    installation = os.environ.get("NULAS_INSTALL_HOME")
+    content = service_text(root, node, Path(installation) if installation else None)
     temporary = path.with_suffix(".service.pending")
     with temporary.open("x") as output:
         output.write(content)

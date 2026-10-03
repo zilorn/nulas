@@ -123,3 +123,34 @@ func TestCLIInstallUsesExecutableLocation(t *testing.T) {
 		t.Fatal("missing installer reported success")
 	}
 }
+
+func TestCLIUpdateDelegation(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "bin"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(root, "bin", "nulas")
+	if err := os.WriteFile(binary, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NULAS_INSTALL_HOME", root)
+	t.Setenv("NULAS_PYTHON", "custom-python")
+	var stdout, stderr bytes.Buffer
+	run := func(ctx context.Context, _, _ io.Writer, name string, args ...string) error {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("update lacks timeout")
+		}
+		want := []string{filepath.Join(root, "scripts", "setup.py"), "update", "--check", "--home", root}
+		if name != "custom-python" || !reflect.DeepEqual(args, want) {
+			t.Fatalf("%s %v", name, args)
+		}
+		return nil
+	}
+	if code := runCLI([]string{"update", "--check"}, &stdout, &stderr, run, func() (string, error) { return binary, nil }); code != 0 {
+		t.Fatalf("%d: %s", code, &stderr)
+	}
+	t.Setenv("NULAS_INSTALL_HOME", "")
+	if code := runCLI([]string{"update"}, &stdout, &stderr, nil, func() (string, error) { return binary, nil }); code == 0 {
+		t.Fatal("unmanaged install allowed update")
+	}
+}

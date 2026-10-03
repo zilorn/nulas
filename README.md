@@ -15,6 +15,72 @@
 
 ## 安装
 
+### 快速安装（Windows / macOS / Linux）
+
+已有依赖且版本符合要求时直接复用，不重复安装。安装器克隆本仓库、安装锁定的前端依赖、检查类型并编译前后端，最后将 `nulas` 加入用户 PATH。不启动服务、不启用托盘、不修改主机网络。
+
+Linux / macOS（bash、zsh、fish 均可执行）：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zilorn/nulas/main/scripts/install.sh | bash
+```
+
+Windows PowerShell：
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/zilorn/nulas/main/scripts/install.ps1 -OutFile "$env:TEMP\nulas-install.ps1"
+& "$env:TEMP\nulas-install.ps1"
+```
+
+也可先下载检查，再执行：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zilorn/nulas/main/scripts/install.sh -o /tmp/nulas-install.sh
+sh /tmp/nulas-install.sh
+```
+
+安装入口是 Shell 脚本；它按需准备 Python，再由 Python 标准库处理跨平台下载、构建与更新。管道方式支持交互式安装依赖，非交互环境缺少管理员权限时会明确失败。
+
+也可以先克隆仓库并检查脚本，再执行 `sh scripts/install.sh` 或 `./scripts/install.ps1`。这些地址需要对应代码已发布到 GitHub 的 `main` 分支。PowerShell 执行策略若禁止脚本，请按本机策略允许已检查的安装脚本运行。
+
+- **系统检测**：支持 Linux / macOS / Windows 的 x64、arm64。Linux 支持 apt（Ubuntu / Debian）、pacman（Arch）、dnf（Fedora）、zypper（openSUSE）、apk（Alpine）的缺失 Git / Python 安装；包管理操作可能要求 sudo。Alpine 等 musl 环境请预先安装满足版本的 Node.js、Go；自动下载的 Linux Node.js 官方包要求 glibc。
+- **依赖复用**：使用现有 Git、Python 3.10+、Node.js 24+、Go 1.23+；pnpm 仅在版本与当前 `packageManager` 完全一致时复用，否则安装到该版本的独立构建目录。缺少合格 Node / Go 时下载官方包并校验 SHA256，安装在 Nulas 目录，不覆盖系统版本。
+- **平台包管理器**：macOS 缺少 Git / Python 时使用 Homebrew，缺少 Homebrew 时调用其[官方安装器](https://docs.brew.sh/Installation)（可能请求管理员授权与安装 Xcode 命令行工具）；Windows 缺少 Git / Python 时使用 winget（需系统已有 App Installer，安装器可能触发系统权限提示）。不自动安装桌面托盘依赖。
+- **安装目录**：Linux / macOS 默认 `~/.local/share/nulas`，Windows 默认 `%LOCALAPPDATA%\Nulas`。Unix 可使用 `sh scripts/install.sh --home /absolute/path`；PowerShell 使用 `./scripts/install.ps1 -HomeDir 'D:\Apps\Nulas'`。可用 `--repository` / `--branch`（PowerShell 为 `-Repository` / `-Branch`）指定来源；更新始终跟踪安装时指定的分支。
+- **PATH**：Unix 保留现有配置，向 bash 的 `.bashrc`、`.profile` / 已有登录配置、zsh 的 `${ZDOTDIR:-$HOME}/.zshrc` 追加路径，同时配置 fish 的 `conf.d/nulas.fish`；Windows 写入当前用户 PATH 并广播环境变化。请重新打开终端；已经运行的父终端可能需重新启动。无需 Bash 4.3 即可运行安装器与 `nulas run`。
+
+安装完成后：
+
+```sh
+nulas run                      # 跨平台前台启动前后端，Ctrl+C 停止
+# Linux 用户级 systemd，可选：
+nulas install
+nulas start
+```
+
+打开 [http://127.0.0.1:8080](http://127.0.0.1:8080)。快速安装的 Linux 服务使用稳定启动器，重启时读取最新已构建版本。Windows / macOS 暂不提供后台服务安装，使用 `nulas run`。
+
+### 更新发现与自动更新
+
+```sh
+nulas update --check            # 获取远端分支，显示当前 / 最新提交，不编译、不切换
+nulas update                    # 下载并编译新版本，成功后原子切换
+nulas update --auto on          # 持久保存开启自动更新
+nulas update --auto off         # 关闭自动更新（默认关闭）
+nulas update --auto status      # 查看自动更新偏好、已安装提交与最近失败
+nulas update --watch            # 独立前台更新调度器，适合只启动后端的情况
+```
+
+快速安装提供上述命令；手工构建的开发仓库继续自行更新、构建，也可用快速安装建立独立受管理安装。
+
+`nulas run`（包括快速安装生成的 Linux 服务）自带更新调度器：启动时检查已保存的偏好，开启后立即检查，此后每 6 小时检查并安装新提交。服务或调度器停止后不会继续定时更新；运行期间更改偏好在下次检查时生效。自动更新的失败写入安装元数据，并在日志中显示。
+
+更新在 `releases/` 的独立检出目录编译；类型检查或构建失败保留当前版本。拒绝远端分支历史重写，使用目录锁避免并发安装。成功后保留旧版本与失败的构建目录，运行中的服务继续使用原版本，执行 `nulas restart`（Linux 服务）或停止并重新运行 `nulas run` 后生效。不会自动重启服务或重放代理 / TUN 操作。
+
+配置和任务保存在安装目录的 `data/`，内核保存在 `runtime/core/`，与版本目录分离；显式设置的 `NULAS_DATA_DIR` / `NULAS_CORE_DIR` 仍优先。安装元数据与自动更新偏好保存在 `installation.json`。不要手动删除当前版本目录；旧版本不会自动清理，以便恢复。安装 / 更新被强制中断后，先确认没有安装进程在运行，再检查并清理 `.update-lock`；不自动重放中断更新。首次安装失败保留现场，修复依赖后应检查并移走未完成的安装目录再重试，不覆盖已有安装。
+
+自动更新会编译并使用所选仓库分支的新代码，请仅对可信来源开启；它更新的是 Nulas，Mihomo 内核仍按原有机制按需安装。
+
 ### 环境要求
 
 | 依赖 | 版本 / 说明 |
@@ -114,13 +180,19 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 
 | 命令 | 说明 |
 | --- | --- |
+| `nulas run` | 快速安装：跨平台前台运行前后端，并按已保存偏好调度更新 |
+| `nulas update` | 快速安装：检查并编译安装新版本，重启后生效 |
+| `nulas update --check` | 仅发现更新 |
+| `nulas update --auto on/off/status` | 开启、关闭或查看自动更新偏好 |
+| `nulas update --watch` | 独立前台自动更新调度器 |
 | `nulas install` | 安装 / 更新 Linux 用户级组合服务，不启动、不开启自启（需要 Python 3） |
 | `nulas status` | 查看服务状态与近期日志；未运行时返回非零退出码 |
 | `nulas start` / `stop` / `restart` | 启动、停止、重启前后端 |
+| `nulas config port [PORT]` | 查询或保存 Web/API 端口，重启后生效 |
 | `nulas`（无参数） | 前台只运行后端 |
 | `nulas --help` | 显示用法 |
 
-命令可从任意目录运行，操作对象是当前用户的 Nulas 组合服务，不会操作系统级同名服务或其他 Mihomo 实例。
+命令可从任意目录运行，服务命令操作对象是当前用户的 Nulas 组合服务，不会操作系统级同名服务或其他 Mihomo 实例。
 
 ### 页面功能
 
@@ -135,6 +207,7 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
+| `NULAS_INSTALL_HOME` | 快速安装器设置的安装目录 | CLI 更新管理；通常无需手工设置 |
 | `NULAS_ADDR` | `127.0.0.1:8080`（或 CLI 保存的端口） | Web/API 监听地址，显式设置时覆盖 CLI 端口 |
 | `NULAS_SSR_URL` | `http://127.0.0.1:3001` | Go 转发页面请求的本机 SSR 地址（仅支持 HTTP 回环 IP） |
 | `NULAS_WEB_DIR` | 空 | 显式启用旧版静态网页托管；不能用于 SSR 构建 |
@@ -166,7 +239,7 @@ macOS/Windows 使用 pystray 原生后端；Linux 需要 GTK/AppIndicator 的 Py
 - **数据目录**：`.data/`、`.runtime/` 与 `bin/` 已被忽略，请勿提交；升级或迁移前保留状态文件以恢复已应用配置和代理快照。
 - **尚未实现**：订阅自动刷新、节点新增 / 编辑 / 删除、规则编辑、配置库编辑与删除、特权（非 GNOME）系统代理控制、非 Linux TUN 管理、外部控制器 TUN 管理、完整配置在线编辑；网络导入为一次性下载，不提供订阅自动更新。完整配置中的 provider URL 会保存在服务器，由 Mihomo 负责后续更新。
 - **配置应用的影响**：完整配置应用会关闭内核现有的 TUN 与透明代理；由 Mihomo 创建的 `Nulas` 网卡与自动路由会影响本机流量，请确认理解后再开启 TUN。
-- **验证状况**：TypeScript 检查、生产构建、Go 测试（race）、`go vet`、Python 测试与托盘协议测试均通过；内核交互使用模拟控制接口验证。实机系统代理切换、真实 TUN 网卡流量、三平台托盘显示、主机 systemd 服务安装与真实订阅地址尚未实测。Go race 全套中有依赖主机环境的用例（9090 端口占用、已有 TUN 网卡）可能失败，属已知环境依赖。
+- **验证状况**：本次安装 / 更新改动的 17 项 Python 测试、CLI race 测试、前端类型检查与生产构建、Go vet、Linux 后端构建，以及 Windows amd64 / macOS arm64 后端交叉编译通过。Go race 全套中的 4 项托管内核 / TUN 用例因本机 9090 端口占用及 TUN 状态依赖失败，未改动主机网络来规避。内核接口使用模拟控制器验证；Windows / macOS 安装器、包管理器实际安装、真实自动升级、三平台托盘显示与真实 TUN 流量尚未实机验证。
 
 ## 目录
 

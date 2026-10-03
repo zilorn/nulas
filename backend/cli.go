@@ -21,10 +21,13 @@ func execCLI(ctx context.Context, stdout, stderr io.Writer, name string, args ..
 	return cmd.Run()
 }
 
-const cliUsage = `Usage: nulas [install|status|start|stop|restart|config port [PORT]]
+const cliUsage = `Usage: nulas [install|status|start|stop|restart|run|update|config port [PORT]]
 
   config port [PORT]  Show or save the web/API port (1–65535; restart to apply).
 
+  run      Run both servers in foreground (quick installation required).
+  update   Check/build/install updates (quick installation required).
+           --check, --auto on|off|status, --watch
   install  Install the Linux user service for both frontend and backend
            (does not start it or enable boot startup; requires Python 3).
   status   Show the combined service's systemd status.
@@ -55,6 +58,34 @@ func runCLI(args []string, stdout, stderr io.Writer, run cliRunner, executable f
 	}
 	if len(args) > 0 && args[0] == "config" {
 		return runPortConfig(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && (args[0] == "update" || args[0] == "run") {
+		binary, err := executable()
+		if err != nil {
+			return cliExit(err, stderr)
+		}
+		binary, err = filepath.EvalSymlinks(binary)
+		if err != nil {
+			return cliExit(err, stderr)
+		}
+		home := os.Getenv("NULAS_INSTALL_HOME")
+		if home == "" {
+			return cliExit(errors.New("run/update require a quick installation; use scripts/install.sh or scripts/install.ps1"), stderr)
+		}
+		script := filepath.Join(filepath.Dir(filepath.Dir(binary)), "scripts", "setup.py")
+		python := env("NULAS_PYTHON", "python3")
+		if runtime.GOOS == "windows" && os.Getenv("NULAS_PYTHON") == "" {
+			python = "python"
+		}
+		forward := append([]string{script}, args...)
+		forward = append(forward, "--home", home)
+		ctx := context.Background()
+		if args[0] == "update" && !strings.Contains(strings.Join(args, " "), "--watch") {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, 2*time.Hour)
+			defer cancel()
+		}
+		return cliExit(run(ctx, stdout, stderr, python, forward...), stderr)
 	}
 	if len(args) != 1 || (args[0] != "install" && args[0] != "status" && args[0] != "start" && args[0] != "stop" && args[0] != "restart") {
 		fmt.Fprint(stderr, cliUsage)
