@@ -15,6 +15,15 @@ def unit_quote(value):
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
 
 
+def working_directory(value):
+    # Unlike ExecStart/Environment, systemd reads this as a literal path;
+    # quotes and backslash escapes are not removed. Only specifiers expand.
+    if (not Path(value).is_absolute() or any(c in value for c in "\n\r\x00")
+            or value != value.strip() or value.endswith("\\")):
+        raise ValueError("Working directory must be an absolute path without newlines, NUL, edge whitespace or a trailing backslash")
+    return value.replace("%", "%%")
+
+
 def service_text(root, node, installation=None):
     start = ":/bin/bash " + unit_quote(str(root / "scripts/start.sh"))
     if installation:
@@ -22,7 +31,7 @@ def service_text(root, node, installation=None):
         metadata = json.loads((installation / "installation.json").read_text(encoding="utf-8"))
         start = ":" + unit_quote(metadata["tools"]["python"]) + " " + unit_quote(str(installation / "bin/launcher.py")) + " run"
     return (MARKER + "[Unit]\nDescription=Nulas frontend and backend\n\n[Service]\n"
-            + "Type=simple\nWorkingDirectory=" + unit_quote(str(root)) + "\n"
+            + "Type=simple\nWorkingDirectory=" + working_directory(str(root)) + "\n"
             + "Environment=" + unit_quote("PATH=" + str(Path(node).parent) + ":/usr/local/bin:/usr/bin:/bin") + "\n"
             + "EnvironmentFile=-%h/.config/nulas/service.env\n"
             + "ExecStart=" + start + "\n"
