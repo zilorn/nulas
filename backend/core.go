@@ -55,6 +55,9 @@ func (a *App) coreStatus() CoreStatus {
 		if j.Status == "queued" || j.Status == "running" {
 			return CoreStatus{"installing", j.Message}
 		}
+		if j.Status == "failed" && a.managedContext != nil {
+			return CoreStatus{"failed", j.Message}
+		}
 		if installed {
 			break
 		}
@@ -62,6 +65,9 @@ func (a *App) coreStatus() CoreStatus {
 			return CoreStatus{"failed", j.Message}
 		}
 		break
+	}
+	if a.coreRuntime.Status != "" {
+		return a.coreRuntime
 	}
 	if installed {
 		return CoreStatus{"installed", "内核已安装；请单独启动并配置控制接口。"}
@@ -76,38 +82,49 @@ func (a *App) ensureCore(w http.ResponseWriter, r *http.Request) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	status := a.coreStatus()
-	if status.Status != "missing" {
-		reply(w, 200, status)
+	code, err := a.queueCore()
+	if err != nil {
+		fail(w, code, err)
 		return
 	}
+	reply(w, code, a.coreStatus())
+}
+
+// Caller holds the state lock. Failed/interrupted jobs require an explicit retry.
+func (a *App) queueCore() (int, error) {
+	status := a.coreStatus()
+	if status.Status != "missing" && !(status.Status == "installed" && a.managedContext != nil) {
+		return 200, nil
+	}
 	if len(a.state.Jobs) >= 1000 {
-		fail(w, 409, errors.New("job history limit reached"))
-		return
+		return 409, errors.New("job history limit reached")
 	}
 	id := make([]byte, 16)
 	if _, err := rand.Read(id); err != nil {
-		fail(w, 500, err)
-		return
+		return 500, err
 	}
-	a.state.Jobs = append(a.state.Jobs, Job{hex.EncodeToString(id), "install-core", "queued", "Waiting to install Mihomo core", time.Now().UTC(), a.state.Config})
+	a.state.Jobs = append(a.state.Jobs, Job{hex.EncodeToString(id), "install-core", "queued", "Waiting to install and start Mihomo core", time.Now().UTC(), a.state.Config})
 	if err := a.persist(); err != nil {
 		a.state.Jobs = a.state.Jobs[:len(a.state.Jobs)-1]
-		fail(w, 500, err)
-		return
+		return 500, err
 	}
 	select {
 	case a.wake <- struct{}{}:
 	default:
 	}
-	reply(w, 202, a.coreStatus())
+	return 202, nil
 }
+
 func (a *App) installCore() error {
 	installed, err := coreInstalled()
 	if err != nil || installed {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	parent := a.managedContext
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, env("NULAS_PYTHON", "python3"), env("NULAS_CORE_INSTALLER", "../scripts/install_core.py"), "--output", filepath.Dir(corePath()))
 	output := &limitedOutput{}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -9,12 +10,16 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -44,6 +49,10 @@ type App struct {
 	dir, controller, secret string
 	wake                    chan struct{}
 	client                  *http.Client
+	managedContext          context.Context
+	coreCommand             *exec.Cmd
+	coreDone                chan struct{}
+	coreRuntime             CoreStatus
 }
 
 func validate(c Config) error {
@@ -142,6 +151,8 @@ func (a *App) handler() http.Handler {
 	mux.Handle("/", http.FileServer(http.Dir(webDir)))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, errors.New("unknown API endpoint")) })
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
 		reply(w, 200, map[string]any{"status": "ok", "controllerConfigured": a.controller != ""})
 	})
 	mux.HandleFunc("GET /api/core", func(w http.ResponseWriter, r *http.Request) {
@@ -194,12 +205,12 @@ func (a *App) handler() http.Handler {
 			fail(w, 400, errors.New("invalid action"))
 			return
 		}
+		a.mu.Lock()
+		defer a.mu.Unlock()
 		if body.Action == "apply" && a.controller == "" {
 			fail(w, 409, errors.New("Set MIHOMO_CONTROLLER on the backend first"))
 			return
 		}
-		a.mu.Lock()
-		defer a.mu.Unlock()
 		if len(a.state.Jobs) >= 1000 {
 			fail(w, 409, errors.New("job history limit reached; archive state before submitting more jobs"))
 			return
@@ -249,7 +260,10 @@ func (a *App) handler() http.Handler {
 }
 func (a *App) runJob(j Job) error {
 	if j.Action == "install-core" {
-		return a.installCore()
+		if err := a.installCore(); err != nil {
+			return err
+		}
+		return a.startCore(j.Config)
 	}
 	b, e := json.MarshalIndent(j.Config, "", "  ")
 	if e != nil {
@@ -261,14 +275,17 @@ func (a *App) runJob(j Job) error {
 	if j.Action == "generate" {
 		return nil
 	}
+	a.mu.Lock()
+	controller, secret := a.controller, a.secret
+	a.mu.Unlock()
 	// PATCH updates only supported runtime settings, preserving proxies, rules and controller credentials.
-	req, e := http.NewRequest(http.MethodPatch, a.controller+"/configs", bytes.NewReader(b))
+	req, e := http.NewRequest(http.MethodPatch, controller+"/configs", bytes.NewReader(b))
 	if e != nil {
 		return e
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if a.secret != "" {
-		req.Header.Set("Authorization", "Bearer "+a.secret)
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
 	}
 	res, e := a.client.Do(req)
 	if e != nil {
@@ -309,7 +326,10 @@ func (a *App) process() bool {
 	a.state.Jobs[idx].Status = "succeeded"
 	a.state.Jobs[idx].Message = "Configuration generated"
 	if j.Action == "install-core" {
-		a.state.Jobs[idx].Message = "Mihomo core installed; start it separately"
+		a.state.Jobs[idx].Message = "Mihomo core installed"
+		if a.managedContext != nil {
+			a.state.Jobs[idx].Message = "Mihomo core started and controller verified"
+		}
 	}
 	if j.Action == "apply" {
 		a.state.Jobs[idx].Message = "Runtime settings applied to Mihomo"
@@ -323,13 +343,15 @@ func (a *App) process() bool {
 	}
 	return true
 }
-func (a *App) worker() {
+func (a *App) worker(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
-		for a.process() {
+		for ctx.Err() == nil && a.process() {
 		}
 		select {
+		case <-ctx.Done():
+			return
 		case <-a.wake:
 		case <-ticker.C:
 		}
@@ -346,8 +368,41 @@ func main() {
 	if e != nil {
 		log.Fatal(e)
 	}
-	go a.worker()
+	listener, err := net.Listen("tcp", env("NULAS_ADDR", "127.0.0.1:8080"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer listener.Close()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if a.controller == "" {
+		a.managedContext = ctx
+		a.mu.Lock()
+		if _, err := a.queueCore(); err != nil {
+			log.Printf("queue core: %v", err)
+		}
+		a.mu.Unlock()
+	}
+	workerDone := make(chan struct{})
+	go func() { defer close(workerDone); a.worker(ctx) }()
 	s := &http.Server{Addr: env("NULAS_ADDR", "127.0.0.1:8080"), Handler: a.handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	log.Printf("Nulas backend listening on %s", s.Addr)
-	log.Fatal(s.ListenAndServe())
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.Shutdown(shutdown)
+	}()
+	if err := s.Serve(listener); err != nil && err != http.ErrServerClosed {
+		stop()
+		log.Printf("server: %v", err)
+	}
+	stop()
+	<-workerDone
+	a.mu.Lock()
+	done := a.coreDone
+	a.mu.Unlock()
+	if done != nil {
+		<-done
+	}
 }

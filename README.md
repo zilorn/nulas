@@ -20,7 +20,7 @@ python3 scripts/install_core.py --version v1.19.0
 .runtime/core/mihomo -d /path/to/core-data -f /path/to/config.yaml
 ```
 
-Windows 使用 `mihomo.exe`。内核和 Nulas 后端分别运行；长期运行可为内核另外配置服务。
+Windows 使用 `mihomo.exe`。Nulas 后端默认自动安装并启动本地内核；指定 `MIHOMO_CONTROLLER` 时连接已有服务。手动下载脚本本身只负责安装。
 
 ## 本地启动
 
@@ -30,7 +30,7 @@ Windows 使用 `mihomo.exe`。内核和 Nulas 后端分别运行；长期运行�
 ./scripts/dev.sh
 ```
 
-脚本安装锁定的前端依赖，编译并同时启动前后端，按 Ctrl+C 会停止两项服务；任一服务退出也会停止另一项服务。可从任意工作目录调用脚本。开发代理固定使用 `127.0.0.1:8080`，请勿自定义 `NULAS_ADDR`。后端沿用环境变量配置，默认数据仍保存到 `backend/.data`。
+脚本安装锁定的前端依赖，编译并同时启动前后端。后端默认检查、安装并启动本地内核，按 Ctrl+C 会停止前后端和托管内核；任一服务退出也会停止另一项服务。可从任意工作目录调用脚本。开发代理固定使用 `127.0.0.1:8080`，请勿自定义 `NULAS_ADDR`。后端沿用环境变量配置，默认数据仍保存到 `backend/.data`。
 
 也可使用两个终端分别运行：
 
@@ -54,7 +54,7 @@ cd backend
 MIHOMO_CONTROLLER=http://127.0.0.1:9090 MIHOMO_SECRET=your-secret go run .
 ```
 
-Mihomo 本身需要启用 `external-controller` 和对应 `secret`。控制接口地址和密钥只保留在后端环境变量中。面板“后端已连接”表示 Nulas API 在线，不代表内核在线；内核错误会显示在任务结果中。
+Mihomo 本身需要启用 `external-controller` 和对应 `secret`。外部控制接口地址和密钥由后端环境变量提供；托管内核的随机密钥只保存在后端内存与私有临时配置文件中。面板“后端已连接”表示 Nulas API 在线，不代表内核在线；内核错误会显示在任务结果中。
 
 ## 已实现
 
@@ -67,7 +67,7 @@ Mihomo 本身需要启用 `external-controller` 和对应 `secret`。控制接�
 - 任务状态 `queued → running → succeeded / failed` 持久保存；网页每两秒更新状态，关闭网页不会取消操作。
 - 后端重启后恢复排队任务；之前执行中的任务标记失败，避免重复执行不确定的外部操作。操作失败可重新提交。
 
-后台任务需要 Go 服务持续运行。队列为单进程单 worker，每次仅允许一个待处理任务；不要启动多个进程共享数据目录。最多保留 1000 条任务，达到上限后需停止服务并备份、归档状态数据。当前不包含订阅、节点、规则编辑、网页内核安装/启动、系统代理或 TUN 管理。
+后台任务需要 Go 服务持续运行。队列为单进程单 worker，每次仅允许一个待处理任务；不要启动多个进程共享数据目录。最多保留 1000 条任务，达到上限后需停止服务并备份、归档状态数据。当前不包含订阅、节点、规则编辑、系统代理或 TUN 管理。托管内核使用基础直连配置，不提供代理节点。
 
 ## 配置变量
 
@@ -130,8 +130,12 @@ pnpm build
 
 当前 SolidStart 1.x / Vinxi 依赖审计存在 14 条传递依赖告警（11 high、3 moderate）；兼容范围内自动修复未消除，强制修复建议会破坏框架版本。生产只发布静态文件，由 Go 托管，不运行 Nitro/Vinxi 服务；开发服务器保持本机使用，后续需跟进框架更新。
 
-### Automatic core installation
+### 自动安装与启动内核
 
-Opening the dashboard checks the local executable and queues installation when missing. The Go worker runs the official checksum-verifying Python downloader; closing the browser does not cancel it. Python 3 and GitHub access are required. Status and failures appear on the dashboard and in durable job history. Failed or interrupted installations require explicit retry. Existing files are preserved. Installation does not start Mihomo or change system networking; configure `MIHOMO_CONTROLLER` separately.
+未设置 `MIHOMO_CONTROLLER` 时，后端启动即创建持久化任务：检查本地可执行文件，必要时调用官方 SHA256 校验下载器，然后自动启动内核。无需打开浏览器。Python 3 和 GitHub 访问能力用于首次下载；已有内核不会重复下载。
 
-When launched from `backend/`, paths default to `../.runtime/core` and `../scripts/install_core.py`. Override `NULAS_CORE_DIR`, `NULAS_CORE_INSTALLER`, and `NULAS_PYTHON` for other deployment layouts.
+后端使用独立的 `.data/managed-core/` 数据目录和每次启动生成的私有临时配置文件，不覆盖用户配置。配置绑定本机代理端口及 `127.0.0.1:9090` 控制接口，生成随机密钥，禁用 TUN，并使用 `MATCH,DIRECT` 基础规则（[官方配置文档](https://wiki.metacubex.one/en/example/conf/)）。它不设置系统代理、不添加节点或订阅。代理端口沿用启动任务的配置快照，局域网访问初始关闭。
+
+只有通过携带密钥的控制接口版本检查后，面板才显示“内核运行中”并启用应用操作。端口冲突、下载和启动失败会显示在面板及任务记录中；启动后的意外退出也会显示失败。失败或中断的安装/启动任务需要明确点击“重试安装 / 启动”，不会自动重放。正常停止后端会停止托管内核并删除临时密钥配置。正常重启后端会重新启动内核。
+
+设置 `MIHOMO_CONTROLLER` 时，后端只连接外部内核，不启动或停止它。默认内核及安装脚本路径相对 `backend/` 为 `../.runtime/core` 和 `../scripts/install_core.py`；其他部署布局可使用 `NULAS_CORE_DIR`、`NULAS_CORE_INSTALLER`、`NULAS_PYTHON` 覆盖。
