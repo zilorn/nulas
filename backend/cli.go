@@ -21,7 +21,9 @@ func execCLI(ctx context.Context, stdout, stderr io.Writer, name string, args ..
 	return cmd.Run()
 }
 
-const cliUsage = `Usage: nulas [install|status|start|stop|restart]
+const cliUsage = `Usage: nulas [install|status|start|stop|restart|config port [PORT]]
+
+  config port [PORT]  Show or save the web/API port (1–65535; restart to apply).
 
   install  Install the Linux user service for both frontend and backend
            (does not start it or enable boot startup; requires Python 3).
@@ -50,6 +52,9 @@ func runCLI(args []string, stdout, stderr io.Writer, run cliRunner, executable f
 	if len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
 		fmt.Fprint(stdout, cliUsage)
 		return 0
+	}
+	if len(args) > 0 && args[0] == "config" {
+		return runPortConfig(args[1:], stdout, stderr)
 	}
 	if len(args) != 1 || (args[0] != "install" && args[0] != "status" && args[0] != "start" && args[0] != "stop" && args[0] != "restart") {
 		fmt.Fprint(stderr, cliUsage)

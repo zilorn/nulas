@@ -27,6 +27,7 @@ fi
   echo "请先运行 scripts/build.sh。" >&2
   exit 1
 }
+web_addr="${NULAS_ADDR:-127.0.0.1:$("$ROOT_DIR/bin/nulas" config port)}"
 backend_pid=""
 frontend_pid=""
 cleanup() {
@@ -52,7 +53,7 @@ backend_pid=$!
 cd "$ROOT_DIR/web"
 NITRO_HOST=127.0.0.1 NITRO_PORT=3001 node .output/server/index.mjs &
 frontend_pid=$!
-printf '\n生产网页与 API：http://%s\n按 Ctrl+C 停止前后端；任一服务退出时会停止另一项服务。\n' "${NULAS_ADDR:-127.0.0.1:8080}"
+printf '\n生产网页与 API：http://%s\n按 Ctrl+C 停止前后端；任一服务退出时会停止另一项服务。\n' "$web_addr"
 status=0
 wait -n "$backend_pid" "$frontend_pid" || status=$?
 echo "生产服务已退出（状态码：$status）。" >&2

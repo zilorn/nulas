@@ -68,6 +68,10 @@ nulas status                   # 查看组合服务状态
 
 打开 [http://127.0.0.1:8080](http://127.0.0.1:8080)。`nulas stop` / `nulas restart` 同时停止或重启前后端，`nulas --help` 查看命令。可将项目 `bin` 的绝对路径加入 shell 配置的 PATH。服务依赖当前项目路径与构建产物，更新代码后重新执行 `./scripts/build.sh` 与 `nulas restart`；迁移目录或更换 Node 路径后先重新执行 `nulas install`。
 
+使用 `nulas config port 9090` 保存 Web 页面与 API 的端口，再运行 `nulas restart`（前台模式请停止后重新启动）。`nulas config port` 查询保存值，未配置时为 `8080`。允许范围为 `1–65535`；端口必须可用，普通用户通常不能绑定低于 `1024` 的端口，生产启动脚本的 SSR 服务占用 `3001`。该配置不改变 Mihomo 的代理端口，也不改变开发服务器的 `3000` 端口。
+
+端口通过原子写入保存至当前用户配置目录的 `nulas/server.json`（Linux 默认 `~/.config/nulas/server.json`，遵循 `XDG_CONFIG_HOME`；macOS/Windows 使用系统用户配置目录），从任意工作目录执行命令均使用同一文件。CLI 与服务应使用同一用户和配置目录。`NULAS_ADDR` 优先于保存值；若服务的 `service.env` 中设置了它，请移除该覆盖以使用保存端口。默认地址仍为 `127.0.0.1:8080`。
+
 已有内核时，在启动服务前把 `MIHOMO_CONTROLLER`、`MIHOMO_SECRET` 等写入 `~/.config/nulas/service.env` 并设为权限 `600`；安装器不会复制终端环境中的凭据。开机自启由网页开关控制、注册状态由 systemd 持久保存；没有 linger 的用户服务只在登录后启动，必要时执行 `loginctl enable-linger`（可能需要主机管理员授权，应用不会代为提权），也可直接运行 `python3 scripts/install_service.py`。
 
 ### 前台与开发启动
@@ -131,7 +135,7 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
-| `NULAS_ADDR` | `127.0.0.1:8080` | 后端监听地址 |
+| `NULAS_ADDR` | `127.0.0.1:8080`（或 CLI 保存的端口） | Web/API 监听地址，显式设置时覆盖 CLI 端口 |
 | `NULAS_SSR_URL` | `http://127.0.0.1:3001` | Go 转发页面请求的本机 SSR 地址（仅支持 HTTP 回环 IP） |
 | `NULAS_WEB_DIR` | 空 | 显式启用旧版静态网页托管；不能用于 SSR 构建 |
 | `NULAS_DATA_DIR` | `.data`（相对工作目录） | 配置、任务和生成文件 |

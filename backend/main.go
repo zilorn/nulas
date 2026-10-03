@@ -502,11 +502,15 @@ func main() {
 	if len(os.Args) > 1 {
 		os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr, execCLI, os.Executable))
 	}
+	addr, err := serverAddress()
+	if err != nil {
+		log.Fatal(err)
+	}
 	a, e := newApp(env("NULAS_DATA_DIR", ".data"), os.Getenv("MIHOMO_CONTROLLER"), os.Getenv("MIHOMO_SECRET"))
 	if e != nil {
 		log.Fatal(e)
 	}
-	listener, err := net.Listen("tcp", env("NULAS_ADDR", "127.0.0.1:8080"))
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -540,8 +544,8 @@ func main() {
 	}
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); a.worker(ctx) }()
-	s := &http.Server{Addr: env("NULAS_ADDR", "127.0.0.1:8080"), Handler: a.handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
-	log.Printf("Nulas backend listening on %s", s.Addr)
+	s := &http.Server{Addr: addr, Handler: a.handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	log.Printf("Nulas web and API listening on http://%s", listener.Addr())
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
