@@ -41,6 +41,7 @@ type Job struct {
 	Document  string    `json:"document,omitempty"`
 }
 type State struct {
+	Applied     *AppliedConfig    `json:"applied,omitempty"`
 	Config      Config            `json:"config"`
 	Jobs        []Job             `json:"jobs"`
 	Profiles    []Profile         `json:"profiles"`
@@ -121,6 +122,15 @@ func newApp(dir, controller, secret string) (*App, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
+	// Upgrade existing successful snapshots without replaying controller requests.
+	if a.state.Applied == nil {
+		for _, j := range a.state.Jobs {
+			if j.Action == "apply" && j.Status == "succeeded" {
+				a.state.Applied = a.appliedSnapshot(j)
+				a.state.Applied.AppliedAt = j.Created
+			}
+		}
+	}
 	for i := range a.state.Jobs {
 		if a.state.Jobs[i].Status == "running" {
 			a.state.Jobs[i].Status = "failed"
@@ -195,6 +205,17 @@ func (a *App) handler() http.Handler {
 			return
 		}
 		reply(w, 200, c)
+	})
+	mux.HandleFunc("GET /api/config/applied", func(w http.ResponseWriter, r *http.Request) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if a.state.Applied == nil {
+			reply(w, 200, nil)
+			return
+		}
+		value := *a.state.Applied
+		value.Document = ""
+		reply(w, 200, value)
 	})
 	a.profileRoutes(mux)
 	a.nodeRoutes(mux)
@@ -417,7 +438,14 @@ func (a *App) process() bool {
 		a.state.Jobs[idx].Status = "failed"
 		a.state.Jobs[idx].Message = err.Error()
 	}
+	previous := a.state.Applied
+	if err == nil && j.Action == "apply" {
+		a.state.Applied = a.appliedSnapshot(j)
+	}
 	if e := a.persist(); e != nil {
+		a.state.Applied = previous
+		a.state.Jobs[idx].Status = "failed"
+		a.state.Jobs[idx].Message = "内核已执行操作，但保存结果失败；请检查内核状态后重试"
 		log.Printf("persist completed job: %v", e)
 	}
 	return true

@@ -2,9 +2,11 @@ import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { api, defaultConfig, type Config } from "../lib/api";
 
 type Profile = { id: string; name: string; config: Config; source: string; created: string; full?: boolean };
+type AppliedConfig = Profile & { appliedAt: string; jobId: string };
 const modes: Record<string, string> = { rule: "规则模式", global: "全局模式", direct: "直连模式" };
 export default function ConfigurationManager(props: { onLoad: (config: Config) => void }) {
  const [profiles, setProfiles] = createSignal<Profile[]>([]);
+ const [applied, setApplied] = createSignal<AppliedConfig | null>(null);
  const [controller, setController] = createSignal(false);
  const [loading, setLoading] = createSignal(true);
  const [editor, setEditor] = createSignal<"create" | "import" | null>(null);
@@ -17,10 +19,10 @@ export default function ConfigurationManager(props: { onLoad: (config: Config) =
  const [error, setError] = createSignal("");
  const [notice, setNotice] = createSignal("");
  const [search, setSearch] = createSignal("");
- const refresh = async () => { const [profiles, health] = await Promise.all([api<Profile[]>("profiles"), api<{controllerConfigured: boolean}>("health")]); setProfiles(profiles); setController(health.controllerConfigured); };
+ const refresh = async () => { const [profiles, health, applied] = await Promise.all([api<Profile[]>("profiles"), api<{controllerConfigured: boolean}>("health"), api<AppliedConfig | null>("config/applied")]); setProfiles(profiles); setController(health.controllerConfigured); setApplied(applied); };
  onMount(() => {
   void refresh().catch(e => setError((e as Error).message)).finally(() => setLoading(false));
-  const timer = setInterval(() => { void api<{controllerConfigured: boolean}>("health").then(h => setController(h.controllerConfigured)).catch(() => setController(false)); }, 5000);
+  const timer = setInterval(() => { void refresh().then(() => setError("")).catch(e => { setController(false); setError(`状态更新失败：${(e as Error).message}`); }); }, 2000);
   onCleanup(() => clearInterval(timer));
  });
  const open = (kind: "create" | "import") => { setEditor(kind); setName(""); setContent(""); setURL(""); setImportKind("local"); setConfig(defaultConfig()); setError(""); setNotice(""); };
@@ -56,9 +58,11 @@ export default function ConfigurationManager(props: { onLoad: (config: Config) =
  const filtered = () => profiles().filter(p => p.name.toLowerCase().includes(search().toLowerCase()));
  return <>
   <section class="intro"><div><span class="eyebrow">CONFIGURATION LIBRARY</span><h1>配置管理<span>，随时切换。</span></h1><p>保存不同场景的核心设置，让每次配置都有迹可循。</p></div><div class="manager-actions"><button class="secondary" disabled={loading() || busy()} onClick={() => open("import")}>↓ 导入配置</button><button disabled={loading() || busy()} onClick={() => open("create")}>＋ 创建配置</button></div></section>
-  <div class="library-summary"><span>已保存 <strong>{profiles().length}</strong> / 100 份配置</span><span>本地持久保存 · 载入后手动应用</span></div>
+  <div class="library-summary"><span>已保存 <strong>{profiles().length}</strong> / 100 份配置</span><span>应用成功后保存 · 托管内核重启自动加载</span></div>
   <Show when={notice()}><p class="success" role="status">{notice()}</p></Show>
   <Show when={error()}><p class="error" role="alert">{error()}</p></Show>
+  <Show when={applied()}>{current => <section class="panel" aria-label="已应用配置"><div class="panel-heading"><div><h2>已应用配置 · {current().name}</h2><p>最后成功应用于 {new Date(current().appliedAt).toLocaleString("zh-CN")}</p></div><span class="status succeeded">已应用 · 已保存</span></div><p>{modes[current().config.mode]} · 端口 {current().config["mixed-port"]} · {current().full ? "含完整配置" : "核心参数配置"}</p><p class="import-note">托管内核下次启动会加载这份配置，保留节点、代理组、规则与 DNS，TUN 默认关闭。外部内核的重启配置由其自身管理；此处记录 Nulas 最后成功应用的结果，外部修改不会同步。</p></section>}</Show>
+  <Show when={!loading() && !applied()}><p class="import-note">尚无成功应用记录。创建、导入或保存编辑内容后，仍需点击应用。</p></Show>
   <Show when={editor()}><section class="panel profile-editor"><div class="panel-heading"><div><h2>{editor() === "import" ? "导入配置" : "创建核心配置"}</h2><p>保存到配置库，不会自动应用到内核。</p></div><button class="secondary" disabled={busy()} onClick={() => setEditor(null)}>取消</button></div>
    <form onSubmit={e => { e.preventDefault(); void save(); }}><fieldset disabled={busy()}>
     <label class="form-label">配置名称{networkImport() ? "（可选）" : ""}<input autofocus required={!networkImport()} maxlength={60} value={name()} onInput={e => setName(e.currentTarget.value)} placeholder={networkImport() ? "留空使用文件内的名称" : "例如：日常使用、局域网共享"} /></label>
@@ -75,7 +79,7 @@ export default function ConfigurationManager(props: { onLoad: (config: Config) =
   <section class="panel"><div class="panel-heading library-heading"><div><h2>我的配置</h2><p>核心参数配置可载入快速配置页；完整配置直接生成或应用，已提交任务的快照保持独立。</p></div><label class="search-label">搜索配置<input type="search" placeholder="输入配置名称" value={search()} onInput={e => setSearch(e.currentTarget.value)} /></label></div>
    <p class="import-note">点击“直接应用”即可重载节点、代理组、规则和 DNS，无需先关闭 TUN 或透明代理。应用后使用本机监听，关闭 TUN、透明代理及自定义入站监听；系统代理设置、控制接口及其凭据保持不变。完整配置生成保留原文。<a href="/tasks">查看后台任务 ↗</a></p>
    <Show when={!loading()} fallback={<p role="status">正在加载配置…</p>}><Show when={filtered().length > 0} fallback={<div class="empty">▤<p>{search() ? "没有匹配的配置" : "配置库还是空的"}</p><small>{search() ? "试试其他名称。" : "创建一份配置，或导入已有核心参数文件。"}</small></div>}>
-    <div class="profile-grid"><For each={filtered()}>{profile => <article class="profile-card"><div class="profile-top"><span class="profile-icon">▤</span><span class="badge">{profile.source === "network" ? "网络导入" : profile.source === "imported" ? "导入" : "创建"}</span></div><h3>{profile.name}</h3><p>{modes[profile.config.mode]} · 端口 {profile.config["mixed-port"]}</p><div class="profile-tags"><Show when={profile.full}><span>完整配置</span></Show><span>{profile.config["allow-lan"] ? "局域网开放" : "仅本机"}</span><span>IPv6 {profile.config.ipv6 ? "开启" : "关闭"}</span><span>日志 {profile.config["log-level"]}</span></div><div class="profile-bottom"><small>{new Date(profile.created).toLocaleString("zh-CN")}</small><Show when={profile.full} fallback={<button class="secondary" disabled={busy()} onClick={() => void load(profile)}>载入配置 ↗</button>}><button class="secondary" disabled={busy()} onClick={() => void submitProfile(profile, "generate")}>生成</button><button disabled={busy() || !controller()} onClick={() => void submitProfile(profile, "apply")}>直接应用</button></Show></div></article>}</For></div>
+    <div class="profile-grid"><For each={filtered()}>{profile => <article class="profile-card"><div class="profile-top"><span class="profile-icon">▤</span><span class="badge">{profile.source === "network" ? "网络导入" : profile.source === "imported" ? "导入" : "创建"}</span></div><h3>{profile.name}</h3><Show when={applied()?.id === profile.id}><span class="status succeeded">已应用 · 已保存</span></Show><p>{modes[profile.config.mode]} · 端口 {profile.config["mixed-port"]}</p><div class="profile-tags"><Show when={profile.full}><span>完整配置</span></Show><span>{profile.config["allow-lan"] ? "局域网开放" : "仅本机"}</span><span>IPv6 {profile.config.ipv6 ? "开启" : "关闭"}</span><span>日志 {profile.config["log-level"]}</span></div><div class="profile-bottom"><small>{new Date(profile.created).toLocaleString("zh-CN")}</small><Show when={profile.full} fallback={<button class="secondary" disabled={busy()} onClick={() => void load(profile)}>载入配置 ↗</button>}><button class="secondary" disabled={busy()} onClick={() => void submitProfile(profile, "generate")}>生成</button><button disabled={busy() || !controller()} onClick={() => void submitProfile(profile, "apply")}>直接应用</button></Show></div></article>}</For></div>
    </Show></Show>
   </section>
  </>;

@@ -29,6 +29,9 @@ func (a *App) startCore(c Config) error {
 	if err := a.managedContext.Err(); err != nil {
 		return err
 	}
+	if a.state.Applied != nil {
+		c = a.state.Applied.Config
+	}
 	a.coreRuntime = CoreStatus{"starting", "正在启动内核…"}
 	failStart := func(err error) error { a.coreRuntime = CoreStatus{"failed", err.Error()}; return err }
 	// Do not connect to or terminate another process occupying the controller port.
@@ -57,8 +60,11 @@ func (a *App) startCore(c Config) error {
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		return failStart(err)
 	}
-	// A new private config each launch preserves user files. No nodes, TUN or system proxy.
-	config := map[string]any{"mixed-port": c.Port, "mode": c.Mode, "allow-lan": false, "bind-address": "127.0.0.1", "ipv6": c.IPv6, "log-level": c.Log, "external-controller": "127.0.0.1:9090", "secret": secret, "rules": []string{"MATCH,DIRECT"}, "tun": map[string]bool{"enable": false}}
+	// Fresh credentials each launch; restore only the last successful snapshot.
+	config, err := a.managedStartupConfig(c, secret)
+	if err != nil {
+		return failStart(err)
+	}
 	data, err := json.Marshal(config)
 	if err != nil {
 		return failStart(err)
@@ -140,6 +146,9 @@ func (a *App) startCore(c Config) error {
 	if ready && a.coreCommand == cmd {
 		a.controller, a.secret = "http://127.0.0.1:9090", secret
 		a.coreRuntime = CoreStatus{"running", "内核运行中，控制接口已连接（基础配置仅直连）。"}
+		if a.state.Applied != nil {
+			a.coreRuntime.Message = "内核运行中，已加载保存的应用配置：" + a.state.Applied.Name
+		}
 		return nil
 	}
 	if a.coreCommand == cmd {
