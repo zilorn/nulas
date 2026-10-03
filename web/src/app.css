@@ -35,3 +35,6 @@
 
 aside{overflow-y:auto}.sidebar-updates{margin-top:auto;padding:16px 10px;border-top:1px solid #e0e9e4;color:#647c70;overflow-wrap:anywhere}.sidebar-update-heading{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#345246}.update-dot{width:7px;height:7px;border-radius:50%;background:#238466}.sidebar-updates p{font-size:11px;margin:8px 0;line-height:1.7}.sidebar-updates small{display:block;font-size:10px;line-height:1.7;margin-top:5px}.sidebar-update-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.sidebar-update-actions button{font-size:11px;padding:7px 9px}.sidebar-updates+.sidebar-note{margin-top:0}
 @media(max-width:700px){.sidebar-updates{flex-basis:100%;margin-top:6px;padding:12px 4px 0}.sidebar-update-actions{margin-top:8px}.sidebar-updates small{display:inline-block;margin-right:10px}}
+
+.language-select { display: grid; gap: 8px; margin: 20px 12px; font-size: 12px; color: var(--muted, #657080); }
+.language-select select { width: 100%; min-width: 0; }

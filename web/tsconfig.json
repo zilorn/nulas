@@ -18,7 +18,8 @@
       "ESNext",
       "DOM",
       "DOM.Iterable"
-    ]
+    ],
+    "allowImportingTsExtensions": true
   },
   "include": [
     "src",

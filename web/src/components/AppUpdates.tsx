@@ -1,9 +1,11 @@
+import { useI18n } from "../lib/i18n";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { api, type Job } from "../lib/api";
 
 type UpdateStatus = { supported: boolean; message: string; installed: string; latest: string; checked: number; available: boolean; restartRequired: boolean; busy: boolean; job: Job | null; error: string };
 
 export default function AppUpdates() {
+ const { t, locale } = useI18n();
  const [status, setStatus] = createSignal<UpdateStatus>();
  const [error, setError] = createSignal("");
  const [submitting, setSubmitting] = createSignal(false);
@@ -34,23 +36,23 @@ export default function AppUpdates() {
  const failed = () => status()?.job?.status === "failed";
  const message = () => {
   const s = status();
-  if (!s) return "正在读取更新状态…";
-  if (s.busy) return s.job?.action === "update-app" ? "正在后台下载并构建更新…" : "正在后台检查更新…";
+  if (!s) return t("正在读取更新状态…");
+  if (s.busy) return s.job?.action === "update-app" ? t("正在后台下载并构建更新…") : t("正在后台检查更新…");
   if (failed()) return s.job?.message;
-  if (s.restartRequired) return "更新已安装，重启 Nulas 后生效";
+  if (s.restartRequired) return t("更新已安装，重启 Nulas 后生效");
   return s.message;
  };
- return <section class="sidebar-updates" aria-label="Nulas 软件更新">
-  <div class="sidebar-update-heading"><strong>软件更新</strong><Show when={status()?.available && !status()?.restartRequired}><span class="update-dot" title="发现更新" /></Show></div>
+ return <section class="sidebar-updates" aria-label={t("Nulas 软件更新")}>
+  <div class="sidebar-update-heading"><strong>{t("软件更新")}</strong><Show when={status()?.available && !status()?.restartRequired}><span class="update-dot" title={t("发现更新")} /></Show></div>
   <p role="status" aria-live="polite" classList={{ error: failed() }}>{message()}</p>
-  <Show when={failed() && status()?.restartRequired}><p>安装版本已切换，重启 Nulas 后生效。</p></Show>
+  <Show when={failed() && status()?.restartRequired}><p>{t("安装版本已切换，重启 Nulas 后生效。")}</p></Show>
   <Show when={error()}><p class="error">{error()}</p></Show>
   <Show when={status()?.supported}>
-   <small>已安装 {status()?.installed.slice(0, 7)}<Show when={status()?.available}> → {status()?.latest.slice(0, 7)}</Show></small>
-   <Show when={status()?.checked}><small>上次检查 {new Date((status()?.checked ?? 0) * 1000).toLocaleString("zh-CN")}</small></Show>
+   <small>{t("已安装")}{status()?.installed.slice(0, 7)}<Show when={status()?.available}> → {status()?.latest.slice(0, 7)}</Show></small>
+   <Show when={status()?.checked}><small>{t("上次检查")}{new Date((status()?.checked ?? 0) * 1000).toLocaleString(locale())}</small></Show>
    <Show when={status()?.error && !failed()}><p class="error">{status()?.error}</p></Show>
-   <div class="sidebar-update-actions"><button class="secondary" disabled={busy()} onClick={() => void submit("check")}>检查更新</button><Show when={status()?.available && !status()?.restartRequired}><button disabled={busy()} onClick={() => void submit("install")}>{status()?.job?.action === "update-app" && failed() ? "重试更新" : "执行更新"}</button></Show></div>
-   <Show when={status()?.available || status()?.restartRequired}><small>更新后请手动重启服务；不会自动重启。</small></Show>
+   <div class="sidebar-update-actions"><button class="secondary" disabled={busy()} onClick={() => void submit("check")}>{t("检查更新")}</button><Show when={status()?.available && !status()?.restartRequired}><button disabled={busy()} onClick={() => void submit("install")}>{status()?.job?.action === "update-app" && failed() ? t("重试更新") : t("执行更新")}</button></Show></div>
+   <Show when={status()?.available || status()?.restartRequired}><small>{t("更新后请手动重启服务；不会自动重启。")}</small></Show>
   </Show>
  </section>;
 }

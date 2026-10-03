@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "test:nodes": "node tests/nodes.test.ts",
     "preview": "vite preview",
-    "start": "node scripts/start.mjs"
+    "start": "node scripts/start.mjs",
+    "test:i18n": "node tests/i18n.test.ts"
   },
   "dependencies": {
     "@solidjs/router": "^0.16.3",
