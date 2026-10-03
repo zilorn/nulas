@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"strings"
 
@@ -133,42 +132,6 @@ func fullApplyPayload(content, namespace string) ([]byte, error) {
 		}
 	}
 	return yaml.Marshal(fields)
-}
-
-// Never turn off an existing TUN session as a side effect of a profile reload.
-func (a *App) checkFullApply(controller, secret string) error {
-	req, err := http.NewRequest(http.MethodGet, controller+"/configs", nil)
-	if err != nil {
-		return err
-	}
-	if secret != "" {
-		req.Header.Set("Authorization", "Bearer "+secret)
-	}
-	res, err := a.client.Do(req)
-	if err != nil {
-		return errors.New("Mihomo controller unavailable")
-	}
-	defer res.Body.Close()
-	var current struct {
-		Tun struct {
-			Enable *bool `json:"enable"`
-		} `json:"tun"`
-		Redir    int `json:"redir-port"`
-		TProxy   int `json:"tproxy-port"`
-		IPTables struct {
-			Enable bool `json:"enable"`
-		} `json:"iptables"`
-	}
-	if res.StatusCode != 200 || json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&current) != nil {
-		return errors.New("无法检查内核运行配置，未应用完整配置")
-	}
-	if (current.Tun.Enable != nil && *current.Tun.Enable) || current.Redir != 0 || current.TProxy != 0 || current.IPTables.Enable {
-		return errors.New("内核正在使用 TUN 或透明代理；为保留现有系统网络状态，未应用完整配置")
-	}
-	if current.Tun.Enable == nil {
-		return errors.New("无法确认内核 TUN 状态，未应用完整配置")
-	}
-	return nil
 }
 
 func validateApplyPorts(content, controller string) error {

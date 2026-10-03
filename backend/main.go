@@ -330,9 +330,6 @@ func (a *App) runJob(j Job) error {
 	a.mu.Unlock()
 	method, endpoint := http.MethodPatch, controller+"/configs"
 	if j.Document != "" {
-		if e = a.checkFullApply(controller, secret); e != nil {
-			return e
-		}
 		if e = validateApplyPorts(j.Document, controller); e != nil {
 			return e
 		}
@@ -401,7 +398,7 @@ func (a *App) process() bool {
 	if j.Action == "apply" {
 		a.state.Jobs[idx].Message = "Runtime settings applied to Mihomo"
 		if j.Document != "" {
-			a.state.Jobs[idx].Message = "完整配置已应用：节点、代理组、规则与 DNS 已重载；使用本机监听，未启用 TUN、透明代理或系统代理"
+			a.state.Jobs[idx].Message = "完整配置已应用：节点、代理组、规则与 DNS 已重载；使用本机监听，TUN 与透明代理已禁用，系统代理设置未修改"
 		}
 	}
 	if j.Action == "tun-enable" || j.Action == "tun-disable" {

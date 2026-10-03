@@ -128,7 +128,8 @@ func TestFullProfileApply(t *testing.T) {
 			t.Error("controller credentials changed")
 		}
 		if r.Method == "GET" {
-			fmt.Fprint(w, `{"tun":{"enable":false},"redir-port":0,"tproxy-port":0}`)
+			t.Error("direct application must not require a runtime-state preflight")
+			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
 		calls++
@@ -183,43 +184,33 @@ func TestFullProfileApply(t *testing.T) {
 }
 
 func TestFullProfileFailureAndInterruptedApply(t *testing.T) {
-	for _, tc := range []struct {
-		name, current string
-		status        int
-		reload        bool
-	}{
-		{"TUN", `{"tun":{"enable":true}}`, 200, false},
-		{"transparent proxy", `{"redir-port":7892}`, 200, false},
-		{"unreadable state", `bad`, 200, false},
-		{"unknown TUN state", `{}`, 200, false},
-		{"iptables", `{"tun":{"enable":false},"iptables":{"enable":true}}`, 200, false},
-		{"controller rejection", `{"tun":{"enable":false}}`, 500, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusInternalServerError} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			calls := 0
 			core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == "GET" {
-					fmt.Fprint(w, tc.current)
-					return
+				if r.Method != http.MethodPut || r.URL.Path != "/configs" {
+					t.Error("direct application sent an unexpected request")
 				}
 				calls++
-				w.WriteHeader(tc.status)
+				w.WriteHeader(status)
 			}))
 			defer core.Close()
 			a := testApp(t, core.URL)
 			p := createFullProfile(t, a, "content", fullProfileFixture)
 			body, _ := json.Marshal(map[string]string{"action": "apply", "profileId": p.ID})
-			request(a, "POST", "/api/jobs", string(body))
+			if w := request(a, "POST", "/api/jobs", string(body)); w.Code != http.StatusAccepted {
+				t.Fatal(w.Body.String())
+			}
 			a.process()
-			if a.state.Jobs[0].Status != "failed" || (calls == 1) != tc.reload {
-				t.Fatal("failure hidden or unsafe reload performed")
+			if a.state.Jobs[0].Status != "failed" || calls != 1 || !strings.Contains(a.state.Jobs[0].Message, fmt.Sprint(status)) {
+				t.Fatal("controller rejection was hidden or retried")
 			}
 			a.state.Jobs[0].Status = "running"
 			if err := a.persist(); err != nil {
 				t.Fatal(err)
 			}
 			b, err := newApp(a.dir, core.URL, "test-secret")
-			if err != nil || b.state.Jobs[0].Status != "failed" || b.process() {
+			if err != nil || b.state.Jobs[0].Status != "failed" || b.process() || calls != 1 {
 				t.Fatal("interrupted full apply was replayed", err)
 			}
 		})
