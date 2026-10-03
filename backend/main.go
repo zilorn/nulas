@@ -45,6 +45,7 @@ type State struct {
 }
 type App struct {
 	mu                      sync.Mutex
+	controlMu               sync.Mutex
 	state                   State
 	dir, controller, secret string
 	wake                    chan struct{}
@@ -149,6 +150,12 @@ func (a *App) handler() http.Handler {
 	mux := http.NewServeMux()
 	webDir := env("NULAS_WEB_DIR", "../web/.output/public")
 	mux.Handle("/", http.FileServer(http.Dir(webDir)))
+	// SolidStart SPA builds emit one entry page; serve it for known client routes.
+	for _, path := range []string{"/tasks", "/nodes"} {
+		mux.HandleFunc("GET "+path, func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, filepath.Join(webDir, "index.html"))
+		})
+	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, errors.New("unknown API endpoint")) })
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
@@ -188,6 +195,7 @@ func (a *App) handler() http.Handler {
 		reply(w, 200, c)
 	})
 	a.profileRoutes(mux)
+	a.nodeRoutes(mux)
 	mux.HandleFunc("GET /api/jobs", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -242,14 +250,18 @@ func (a *App) handler() http.Handler {
 	// Reject cross-origin writes, including form submissions from other sites.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		if r.Method == "PUT" || r.Method == "POST" {
+		if r.Method == "PUT" || r.Method == "POST" || r.Method == "PATCH" || r.Method == "DELETE" {
 			if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 				fail(w, 415, errors.New("application/json required"))
 				return
 			}
 			if origin := r.Header.Get("Origin"); origin != "" {
 				u, e := url.Parse(origin)
-				if e != nil || u.Host != r.Host {
+				scheme := "http"
+				if r.TLS != nil {
+					scheme = "https"
+				}
+				if e != nil || u.Scheme != scheme || u.Host != r.Host || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 					fail(w, 403, errors.New("cross-origin write rejected"))
 					return
 				}
@@ -275,6 +287,8 @@ func (a *App) runJob(j Job) error {
 	if j.Action == "generate" {
 		return nil
 	}
+	a.controlMu.Lock()
+	defer a.controlMu.Unlock()
 	a.mu.Lock()
 	controller, secret := a.controller, a.secret
 	a.mu.Unlock()

@@ -24,7 +24,7 @@ Nulas is a browser-based quick configuration dashboard for https://github.com/Me
 - Keep controller credentials on the server. Keep loopback binding and same-origin API defaults; remote deployment requires separately implemented authentication and TLS.
 - Preserve atomic persistence, bounded requests, validation, durable job snapshots and visible failure states. Background operations must not depend on an open browser.
 - An interrupted running job must be marked failed on restart, never blindly replay an external side effect. Pending jobs may resume.
-- This starter does not implement subscriptions, node management, privileged system proxy/TUN control, or full Mihomo configuration management. Document such limitations honestly.
+- Node management reads the connected core and selects members of existing manual proxy groups. This starter does not implement subscriptions, node creation/editing/deletion, privileged system proxy/TUN control, or full Mihomo configuration management. Document such limitations honestly.
 
 ## Completion and Git
 Run relevant checks and document any unavailable verification. Commit completed work using `feat: <message>`, `fix: <message>` or `docs: <message>` with English messages. Add concise implementation details to the commit body when useful. Split very large tasks into coherent commits. After committing, report the commit hashes and messages to the user in a table. Do not amend or discard unrelated user work.

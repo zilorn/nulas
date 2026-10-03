@@ -143,6 +143,11 @@ func TestHostedFrontend(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "Nulas") {
 		t.Fatal("frontend was not served")
 	}
+	for _, path := range []string{"/tasks", "/nodes"} {
+		if w := request(a, "GET", path, ""); w.Code != 200 || !strings.Contains(w.Body.String(), "Nulas") {
+			t.Fatalf("client route %s unavailable: %d", path, w.Code)
+		}
+	}
 	if request(a, "GET", "/api/unknown", "").Code != 404 {
 		t.Fatal("unknown API should not serve frontend")
 	}
