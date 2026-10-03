@@ -23,3 +23,9 @@
 @media(max-width:900px){.config-layout{grid-template-columns:1fr}.config-intro{gap:14px}.config-side .system-settings{margin-top:16px}}
 @media(max-width:700px){.config-intro{flex-direction:column;align-items:flex-start;padding:24px 0 20px}.config-intro h1{font-size:26px}.config-fields{grid-template-columns:1fr;gap:16px}.config-modes{gap:7px}.config-mode{padding:12px 8px}.config-mode span{font-size:13px}.config-mode small{font-size:10px}.config-save .actions{display:grid;grid-template-columns:1fr 1fr}.config-save .actions button:last-child{grid-column:1/-1}.applied-panel .panel-heading{align-items:flex-start;flex-direction:column}.profile-actions button{flex:1}.profile-card{padding:18px}.manager-actions{flex-wrap:wrap}.manager-actions button{white-space:nowrap}}
 .core-overview{margin-bottom:24px}
+
+/* Keep sidebar artwork aligned independently of the text font. */
+.nav{display:flex;align-items:center;gap:12px}
+.nav-icon{width:20px;height:20px;flex-shrink:0;display:block}
+.brand-icon{width:32px;height:32px;flex-shrink:0;display:block}
+@media(max-width:700px){.nav{gap:6px}.nav-icon{width:18px;height:18px}.brand-icon{width:26px;height:26px}}
