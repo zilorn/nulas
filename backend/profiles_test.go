@@ -1,7 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,5 +118,84 @@ func TestProfileLibraryLimits(t *testing.T) {
 	}
 	if request(a, "POST", "/api/profiles", `{"name":"`+strings.Repeat("x", 61)+`","content":"mode: rule"}`).Code != 400 {
 		t.Fatal("name limit exceeded")
+	}
+}
+
+func TestNetworkImport(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Error("controller credentials leaked")
+		}
+		switch r.URL.Path {
+		case "/valid":
+			fmt.Fprint(w, "mixed-port: 8888\nmode: direct")
+		case "/json":
+			fmt.Fprint(w, `{"mode":"global"}`)
+		case "/redirect":
+			http.Redirect(w, r, "/valid", http.StatusFound)
+		case "/loop":
+			http.Redirect(w, r, "/loop", http.StatusFound)
+		case "/large":
+			w.Header().Set("Content-Length", "6001")
+			fmt.Fprint(w, strings.Repeat("x", 6001))
+		case "/chunked":
+			w.(http.Flusher).Flush()
+			fmt.Fprint(w, strings.Repeat("x", 6001))
+		case "/unsupported":
+			fmt.Fprint(w, "proxies: []")
+		case "/empty":
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	a := testApp(t, "")
+	a.secret = "controller-secret"
+	for i, path := range []string{"/valid", "/json", "/redirect"} {
+		body, _ := json.Marshal(map[string]string{"name": fmt.Sprintf("Network %d", i), "url": server.URL + path + "?token=private-token"})
+		w := request(a, "POST", "/api/profiles", string(body))
+		if w.Code != 201 {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+		var p Profile
+		if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.Source != "network" || a.state.Config.Port != 7890 {
+			t.Fatal("incorrect source or current config changed")
+		}
+	}
+	b, err := newApp(a.dir, "", "")
+	if err != nil || len(b.state.Profiles) != 3 || b.state.Profiles[0].Config.Port != 8888 {
+		t.Fatalf("persistence: %v", err)
+	}
+	persisted, err := os.ReadFile(filepath.Join(a.dir, "state.json"))
+	if err != nil || strings.Contains(string(persisted), "private-token") || strings.Contains(string(persisted), server.URL) {
+		t.Fatal("URL persisted", err)
+	}
+	for _, path := range []string{"/loop", "/large", "/chunked", "/unsupported", "/empty", "/missing"} {
+		body, _ := json.Marshal(map[string]string{"name": "Failure", "url": server.URL + path + "?token=private-token"})
+		w := request(a, "POST", "/api/profiles", string(body))
+		if w.Code != 400 || len(a.state.Profiles) != 3 || strings.Contains(w.Body.String(), "private-token") {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+	}
+	for _, body := range []string{
+		`{"name":"A","url":"file:///etc/passwd"}`,
+		`{"name":"A","url":"https://user:pass@example.com/config"}`,
+		`{"name":"A","url":"https://example.com/config#fragment"}`,
+		`{"name":"A","url":"https://"}`,
+		`{"name":"A","url":""}`,
+		`{"name":"A","url":"https://example.com","content":"mode: rule"}`,
+		`{"name":"A","url":"https://example.com","config":{}}`,
+	} {
+		if w := request(a, "POST", "/api/profiles", body); w.Code != 400 || len(a.state.Profiles) != 3 {
+			t.Fatalf("accepted invalid request: %s", body)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := fetchImportConfig(ctx, server.URL+"/valid?token=private-token"); err == nil || strings.Contains(err.Error(), "private-token") {
+		t.Fatal("cancellation or error redaction failed")
 	}
 }

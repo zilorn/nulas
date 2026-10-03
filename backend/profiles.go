@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -8,10 +9,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 )
+
+const maxImportBytes = 6000
+
+const networkImportTimeout = 15 * time.Second
 
 type Profile struct {
 	ID      string    `json:"id"`
@@ -26,7 +32,7 @@ type Profile struct {
 func importConfig(content string) (Config, error) {
 	c := Config{7890, "rule", false, false, "info"}
 	content = strings.TrimSpace(strings.TrimPrefix(content, "\ufeff"))
-	if len(content) > 6000 {
+	if len(content) > maxImportBytes {
 		return c, errors.New("导入内容不能超过 6 KB")
 	}
 	if content == "" {
@@ -139,6 +145,64 @@ func importConfig(content string) (Config, error) {
 	return c, validate(c)
 }
 
+// URLs may contain tokens: never persist them or include them in errors.
+func validateImportURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Fragment != "" || len(raw) > 4096 {
+		return nil, errors.New("请提供有效的 HTTP/HTTPS 配置地址（不含用户名、密码或片段）")
+	}
+	return u, nil
+}
+
+func fetchImportConfig(ctx context.Context, raw string) (Config, error) {
+	u, err := validateImportURL(strings.TrimSpace(raw))
+	if err != nil {
+		return Config{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, networkImportTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return Config{}, errors.New("配置地址无效")
+	}
+	req.Header.Set("Accept", "application/yaml, application/json, text/yaml, text/plain")
+	// Separate direct client: no controller credentials or proxy dependency.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) > 5 {
+			return errors.New("重定向次数过多")
+		}
+		if _, err := validateImportURL(req.URL.String()); err != nil {
+			return err
+		}
+		if via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
+			return errors.New("不允许 HTTPS 降级")
+		}
+		return nil
+	}}
+	response, err := client.Do(req)
+	if err != nil {
+		return Config{}, errors.New("配置下载失败，请检查地址、网络或重定向；下载须在 15 秒内完成")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return Config{}, fmt.Errorf("配置下载失败：HTTP %d", response.StatusCode)
+	}
+	if response.ContentLength > maxImportBytes {
+		return Config{}, errors.New("导入内容不能超过 6 KB")
+	}
+	content, err := io.ReadAll(io.LimitReader(response.Body, maxImportBytes+1))
+	if err != nil {
+		return Config{}, errors.New("配置下载未完成，请重试")
+	}
+	if len(content) > maxImportBytes {
+		return Config{}, errors.New("导入内容不能超过 6 KB")
+	}
+	return importConfig(string(content))
+}
+
 func (a *App) profileRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/profiles", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
@@ -154,6 +218,7 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 			Name    string  `json:"name"`
 			Config  *Config `json:"config"`
 			Content *string `json:"content"`
+			URL     *string `json:"url"`
 		}
 		if err := decode(w, r, &body); err != nil {
 			fail(w, 400, err)
@@ -164,13 +229,31 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 			fail(w, 400, errors.New("配置名称须为 1–60 个字符"))
 			return
 		}
-		if (body.Config == nil) == (body.Content == nil) {
-			fail(w, 400, errors.New("请提供配置参数或导入内容"))
+		sources := 0
+		if body.Config != nil {
+			sources++
+		}
+		if body.Content != nil {
+			sources++
+		}
+		if body.URL != nil {
+			sources++
+		}
+		if sources != 1 {
+			fail(w, 400, errors.New("请仅提供配置参数、导入内容或网络地址中的一项"))
 			return
 		}
 		var c Config
 		source := "created"
-		if body.Content != nil {
+		if body.URL != nil {
+			var err error
+			c, err = fetchImportConfig(r.Context(), *body.URL)
+			if err != nil {
+				fail(w, 400, err)
+				return
+			}
+			source = "network"
+		} else if body.Content != nil {
 			var err error
 			c, err = importConfig(*body.Content)
 			if err != nil {
