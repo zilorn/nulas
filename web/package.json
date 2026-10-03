@@ -1,0 +1,21 @@
+{
+  "name": "nulas-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vinxi dev",
+    "build": "vinxi build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@solidjs/start": "^1.1.0",
+    "@solidjs/router": "^0.15.0",
+    "solid-js": "^1.9.0",
+    "vinxi": "^0.5.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  },
+  "packageManager": "pnpm@11.22.0"
+}

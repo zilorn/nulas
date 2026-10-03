@@ -1,0 +1,9 @@
+node_modules/
+.output/
+.vinxi/
+.data/
+.env
+bin/
+*.log
+.runtime/
+__pycache__/
