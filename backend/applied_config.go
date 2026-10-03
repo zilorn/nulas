@@ -1,9 +1,6 @@
 package main
 
-import (
-	"encoding/json"
-	"time"
-)
+import "time"
 
 // Document is private. The snapshot is independent of both the editor and library.
 type AppliedConfig struct {
@@ -21,10 +18,7 @@ func (a *App) appliedSnapshot(j Job) *AppliedConfig {
 			break
 		}
 	}
-	if j.Document != "" {
-		// Full application forces loopback listeners.
-		p.Config.LAN = false
-	} else if a.state.Applied != nil && a.state.Applied.Full {
+	if j.Document == "" && a.state.Applied != nil && a.state.Applied.Full {
 		// PATCH changes core settings only; preserve the active nodes/rules/DNS.
 		p.Full, p.Document = true, a.state.Applied.Document
 		p.Name += "（保留完整配置）"
@@ -33,7 +27,7 @@ func (a *App) appliedSnapshot(j Job) *AppliedConfig {
 }
 
 // Build the managed process's startup file, rather than replaying an apply job.
-// Keep the same safe listeners and fresh server-only controller credentials.
+// Restore the selected proxy listener and fresh server-only controller credentials.
 func (a *App) managedStartupConfig(c Config, secret string) (map[string]any, error) {
 	fields := map[string]any{"rules": []string{"MATCH,DIRECT"}}
 	if applied := a.state.Applied; applied != nil {
@@ -52,19 +46,25 @@ func (a *App) managedStartupConfig(c Config, secret string) (map[string]any, err
 			}
 		}
 	}
-	data, err := json.Marshal(c)
-	if err != nil {
-		return nil, err
-	}
-	var settings map[string]any
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return nil, err
-	}
-	for key, value := range settings {
+	for key, value := range coreSettings(c) {
 		fields[key] = value
 	}
-	fields["allow-lan"], fields["bind-address"] = false, "127.0.0.1"
 	fields["external-controller"], fields["secret"] = "127.0.0.1:9090", secret
 	fields["tun"] = map[string]any{"enable": false}
 	return fields, nil
+}
+
+// Proxy sharing never changes the controller or dashboard listener.
+func proxyBindAddress(lan bool) string {
+	if lan {
+		return "*"
+	}
+	return "127.0.0.1"
+}
+
+func coreSettings(c Config) map[string]any {
+	return map[string]any{
+		"mixed-port": c.Port, "mode": c.Mode, "allow-lan": c.LAN,
+		"ipv6": c.IPv6, "log-level": c.Log, "bind-address": proxyBindAddress(c.LAN),
+	}
 }

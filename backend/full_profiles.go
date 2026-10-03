@@ -103,7 +103,7 @@ func publicProfile(p Profile) Profile {
 func publicJob(j Job) Job { j.Document = ""; j.RefreshURL = ""; return j }
 
 // Applying a full profile is explicit. Original configuration is preserved for
-// export; only the applied copy uses loopback listeners and disables privileged
+// export; only the applied copy follows allow-lan for proxy listeners and disables privileged
 // interception. Controller settings are not taken from imported files.
 func fullApplyPayload(content, namespace string) ([]byte, error) {
 	fields, err := parseFullDocument(content)
@@ -113,8 +113,9 @@ func fullApplyPayload(content, namespace string) ([]byte, error) {
 	for _, key := range []string{"name", "external-controller", "external-controller-tls", "external-controller-unix", "external-controller-pipe", "secret", "external-ui", "external-ui-url", "external-ui-name", "external-controller-cors", "listeners", "tunnels", "interface-name", "routing-mark", "redir-port", "tproxy-port", "authentication", "skip-auth-prefixes", "lan-allowed-ips", "lan-disallowed-ips", "tuic-server", "ss-config", "vmess-config"} {
 		delete(fields, key)
 	}
-	fields["allow-lan"] = false
-	fields["bind-address"] = "127.0.0.1"
+	lan, _ := fields["allow-lan"].(bool)
+	fields["allow-lan"] = lan
+	fields["bind-address"] = proxyBindAddress(lan)
 	fields["tun"] = map[string]any{"enable": false}
 	fields["iptables"] = map[string]any{"enable": false}
 	if dns, ok := fields["dns"].(map[string]any); ok {

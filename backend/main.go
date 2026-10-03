@@ -376,7 +376,7 @@ func (a *App) runJob(j Job) error {
 		}
 		return a.startCore(j.Config)
 	}
-	b, e := json.MarshalIndent(j.Config, "", "  ")
+	b, e := json.MarshalIndent(coreSettings(j.Config), "", "  ")
 	if j.Document != "" {
 		b = []byte(j.Document)
 	}
@@ -476,7 +476,7 @@ func (a *App) process() bool {
 	if j.Action == "apply" {
 		a.state.Jobs[idx].Message = "Runtime settings applied to Mihomo"
 		if j.Document != "" {
-			a.state.Jobs[idx].Message = "完整配置已应用：节点、代理组、规则与 DNS 已重载；使用本机监听，TUN 与透明代理已禁用，系统代理设置未修改"
+			a.state.Jobs[idx].Message = "完整配置已应用：节点、代理组、规则与 DNS 已重载；代理监听遵循允许局域网连接设置，TUN 与透明代理已禁用，系统代理设置未修改"
 		}
 	}
 	if j.Action == "tun-enable" || j.Action == "tun-disable" {
