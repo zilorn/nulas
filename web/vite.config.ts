@@ -7,7 +7,7 @@ const ports = readPorts();
 const backendAddress = process.env.NULAS_ADDR || `127.0.0.1:${ports.port}`;
 
 export default defineConfig({
-  plugins: [solidStart({ ssr: true }), nitro()],
+  plugins: [solidStart({ ssr: true, middleware: "src/middleware.ts" }), nitro()],
   nitro: {
     preset: "node",
     // Nitro handles application requests before Vite's ordinary proxy.

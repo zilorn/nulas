@@ -12,6 +12,11 @@ import (
 )
 
 func TestCLIServiceCommands(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("NULAS_ADDR", "")
+	if code := runPortConfig([]string{"port", "4769"}, io.Discard, io.Discard); code != 0 {
+		t.Fatal("cannot save test port")
+	}
 	for _, action := range []string{"status", "start", "stop", "restart"} {
 		t.Run(action, func(t *testing.T) {
 			var calls [][]string
@@ -33,7 +38,25 @@ func TestCLIServiceCommands(t *testing.T) {
 			if !reflect.DeepEqual(calls, want) {
 				t.Fatalf("calls = %v", calls)
 			}
+			started := action == "start" || action == "restart"
+			if bytes.Contains(stdout.Bytes(), []byte("http://127.0.0.1:4769/")) != started || bytes.Contains(stdout.Bytes(), []byte("SSR 端口仅供内部")) != started {
+				t.Fatalf("unexpected browser guidance: %s", &stdout)
+			}
 		})
+	}
+}
+
+func TestCLIStartAddressOverride(t *testing.T) {
+	t.Setenv("NULAS_ADDR", "127.0.0.1:4869")
+	var stdout, stderr bytes.Buffer
+	run := func(_ context.Context, out, _ io.Writer, _ string, args ...string) error {
+		if args[1] == "show" {
+			io.WriteString(out, "Nulas frontend and backend\n")
+		}
+		return nil
+	}
+	if code := runCLI([]string{"start"}, &stdout, &stderr, run, nil); code != 0 || !bytes.Contains(stdout.Bytes(), []byte("http://127.0.0.1:4869/")) {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
 	}
 }
 

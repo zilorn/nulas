@@ -146,5 +146,15 @@ func runCLI(args []string, stdout, stderr io.Writer, run cliRunner, executable f
 	if args[0] != "status" {
 		fmt.Fprintf(stdout, "Nulas frontend and backend: %s completed.\n", args[0])
 	}
+	if args[0] == "start" || args[0] == "restart" {
+		addr, err := serverAddress()
+		if err != nil {
+			fmt.Fprintf(stderr, "无法读取浏览器入口：%v；请检查 nulas config port。\n", err)
+		} else {
+			fmt.Fprintf(stdout, "浏览器入口（当前 CLI 配置）：http://%s/\n", addr)
+		}
+		fmt.Fprintln(stdout, "请访问 Web/API 入口；SSR 端口仅供内部页面渲染，直接访问会导致 API 请求失败。")
+		fmt.Fprintln(stdout, "若 service.env 覆盖了端口，请以服务启动日志为准；服务运行状态可用 nulas status 查看。")
+	}
 	return 0
 }

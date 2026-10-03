@@ -147,6 +147,8 @@ nulas status                   # 查看组合服务状态
 
 三个 Nulas 端口均可在 CLI 中自定义，默认 Web/API 为 `4669`、SSR 为 `4668`、开发前端为 `4589`：
 
+生产环境请访问 Web/API 端口。`4668` 是 Go 转发页面请求所用的内部 SSR 端口，直接打开它虽然能看到页面，但无法调用 API；仅运行 `pnpm start` 也不会启动 Go 后端。`nulas start` / `nulas restart` 成功后会显示当前 CLI 配置的浏览器入口和 SSR 端口说明；若 `service.env` 覆盖了端口，以服务启动日志为准。若出现“状态更新失败”、API 返回 HTML 或“SSR 内部端口”提示，请通过 `nulas config port` 查询入口端口，并用 `nulas start`、`nulas run` 或 `scripts/start.sh` 启动前后端。
+
 ```sh
 nulas config                   # 显示全部保存值；未保存的项目显示默认值
 nulas config port 4769         # Web 页面与 API
