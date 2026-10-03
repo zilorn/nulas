@@ -292,3 +292,11 @@ macOS/Windows 使用 pystray 原生后端；Linux 需要 GTK/AppIndicator 的 Py
 打开侧边栏「内核管理」（`/core`），可分页查看 [Mihomo 官方稳定版本](https://github.com/MetaCubeX/mihomo/releases)、查看发布说明、切换到历史版本，或一键更新到最新稳定版。需要 GitHub 网络访问；请求限额、平台不支持、缺少 SHA256 或下载校验失败会显示失败结果。仅支持 Nulas 生产入口启动的托管内核，外部控制器需自行管理。
 
 操作先保存明确版本的后台任务，再由单一后台 worker 下载、校验和重启，关闭页面不影响执行。版本存放在 `.runtime/core/versions/<tag>/`，通过原子写入的 `active-version` 选择；旧的 `.runtime/core/mihomo` 与用户配置保留，已下载的版本可复用。启动及控制接口检查失败时尝试恢复原版本，恢复失败会显示实际错误。重启会短暂中断连接，加载最后成功应用的配置，TUN 保持关闭，需手动重新开启；不会修改系统代理设置。重启 Nulas 后，中断的运行任务标记为失败，不自动重放；等待中的任务可以继续。
+
+### 界面语言 / Interface language
+
+侧栏的“界面语言”支持简体中文和 English。首次使用根据浏览器语言选择，不支持的语言回退到中文；手动选择通过浏览器 Cookie 保存一年。SSR 和首次 hydration 使用中文，浏览器挂载后切换到所选语言。页面标题、无障碍标签和日期格式随语言切换。
+
+The sidebar language selector supports Simplified Chinese and English. On first use it follows supported browser language preferences, falling back to Chinese. Manual selection is saved in a browser cookie for one year. SSR and initial hydration use Chinese; the selected language is applied after mounting. Page titles, accessible labels and date formatting follow the selected language.
+
+后端任务日志、运行诊断与第三方错误保留原文；已显示的操作通知保留触发时的语言。多语言维护规范见项目技能 [nulas-i18n](skills/nulas-i18n/SKILL.md)。运行 `cd web && pnpm test:i18n` 检查翻译覆盖与占位符。
