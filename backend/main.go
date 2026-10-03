@@ -31,12 +31,14 @@ type Config struct {
 	Log  string `json:"log-level"`
 }
 type Job struct {
-	ID      string    `json:"id"`
-	Action  string    `json:"action"`
-	Status  string    `json:"status"`
-	Message string    `json:"message"`
-	Created time.Time `json:"created"`
-	Config  Config    `json:"config"`
+	ID        string    `json:"id"`
+	Action    string    `json:"action"`
+	Status    string    `json:"status"`
+	Message   string    `json:"message"`
+	Created   time.Time `json:"created"`
+	Config    Config    `json:"config"`
+	ProfileID string    `json:"profileId,omitempty"`
+	Document  string    `json:"document,omitempty"`
 }
 type State struct {
 	Config   Config    `json:"config"`
@@ -196,11 +198,16 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("GET /api/jobs", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		reply(w, 200, a.state.Jobs)
+		jobs := make([]Job, len(a.state.Jobs))
+		for i, j := range a.state.Jobs {
+			jobs[i] = publicJob(j)
+		}
+		reply(w, 200, jobs)
 	})
 	mux.HandleFunc("POST /api/jobs", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Action string `json:"action"`
+			Action    string `json:"action"`
+			ProfileID string `json:"profileId"`
 		}
 		if e := decode(w, r, &body); e != nil {
 			fail(w, 400, e)
@@ -231,7 +238,25 @@ func (a *App) handler() http.Handler {
 			fail(w, 500, e)
 			return
 		}
-		j := Job{hex.EncodeToString(id), body.Action, "queued", "Waiting for worker", time.Now().UTC(), a.state.Config}
+		j := Job{ID: hex.EncodeToString(id), Action: body.Action, Status: "queued", Message: "Waiting for worker", Created: time.Now().UTC(), Config: a.state.Config}
+		if body.ProfileID != "" {
+			if body.Action == "install-core" {
+				fail(w, 400, errors.New("安装内核不能指定配置"))
+				return
+			}
+			found := false
+			for _, p := range a.state.Profiles {
+				if p.ID == body.ProfileID {
+					j.Config, j.Document, j.ProfileID = p.Config, p.Document, p.ID
+					found = true
+					break
+				}
+			}
+			if !found {
+				fail(w, 404, errors.New("配置不存在"))
+				return
+			}
+		}
 		a.state.Jobs = append(a.state.Jobs, j)
 		if e := a.persist(); e != nil {
 			a.state.Jobs = a.state.Jobs[:len(a.state.Jobs)-1]
@@ -242,7 +267,7 @@ func (a *App) handler() http.Handler {
 		case a.wake <- struct{}{}:
 		default:
 		}
-		reply(w, 202, j)
+		reply(w, 202, publicJob(j))
 	})
 	// Reject cross-origin writes, including form submissions from other sites.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -275,6 +300,9 @@ func (a *App) runJob(j Job) error {
 		return a.startCore(j.Config)
 	}
 	b, e := json.MarshalIndent(j.Config, "", "  ")
+	if j.Document != "" {
+		b = []byte(j.Document)
+	}
 	if e != nil {
 		return e
 	}
@@ -289,8 +317,25 @@ func (a *App) runJob(j Job) error {
 	a.mu.Lock()
 	controller, secret := a.controller, a.secret
 	a.mu.Unlock()
-	// PATCH updates only supported runtime settings, preserving proxies, rules and controller credentials.
-	req, e := http.NewRequest(http.MethodPatch, controller+"/configs", bytes.NewReader(b))
+	method, endpoint := http.MethodPatch, controller+"/configs"
+	if j.Document != "" {
+		if e = a.checkFullApply(controller, secret); e != nil {
+			return e
+		}
+		if e = validateApplyPorts(j.Document, controller); e != nil {
+			return e
+		}
+		payload, err := fullApplyPayload(j.Document, j.ID)
+		if err != nil {
+			return err
+		}
+		b, e = json.Marshal(map[string]string{"payload": string(payload)})
+		if e != nil {
+			return e
+		}
+		method, endpoint = http.MethodPut, controller+"/configs?force=true"
+	}
+	req, e := http.NewRequest(method, endpoint, bytes.NewReader(b))
 	if e != nil {
 		return e
 	}
@@ -344,6 +389,9 @@ func (a *App) process() bool {
 	}
 	if j.Action == "apply" {
 		a.state.Jobs[idx].Message = "Runtime settings applied to Mihomo"
+		if j.Document != "" {
+			a.state.Jobs[idx].Message = "完整配置已应用：节点、代理组、规则与 DNS 已重载；使用本机监听，未启用 TUN、透明代理或系统代理"
+		}
 	}
 	if err != nil {
 		a.state.Jobs[idx].Status = "failed"

@@ -20,16 +20,19 @@ import (
 const networkImportTimeout = 15 * time.Second
 
 type Profile struct {
-	ID      string    `json:"id"`
-	Name    string    `json:"name"`
-	Config  Config    `json:"config"`
-	Source  string    `json:"source"`
-	Created time.Time `json:"created"`
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Config   Config    `json:"config"`
+	Source   string    `json:"source"`
+	Created  time.Time `json:"created"`
+	Full     bool      `json:"full,omitempty"`
+	Document string    `json:"document,omitempty"`
 }
 
 type importedConfig struct {
 	Config
-	Name string
+	Name     string
+	Document string
 }
 
 func importConfig(content string) (Config, error) {
@@ -267,7 +270,7 @@ func fetchImportConfig(ctx context.Context, raw string) (importedConfig, error) 
 	if err != nil {
 		return importedConfig{}, errors.New("配置下载未完成，请重试")
 	}
-	imported, err := importNamedConfig(string(content))
+	imported, err := importProfileConfig(string(content))
 	if err != nil {
 		return importedConfig{}, fmt.Errorf("下载内容无法作为核心配置导入：%w", err)
 	}
@@ -282,7 +285,11 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 		if profiles == nil {
 			profiles = []Profile{}
 		}
-		reply(w, 200, profiles)
+		result := make([]Profile, len(profiles))
+		for i, p := range profiles {
+			result[i] = publicProfile(p)
+		}
+		reply(w, 200, result)
 	})
 	mux.HandleFunc("POST /api/profiles", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -315,12 +322,14 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 			return
 		}
 		var c Config
+		var document string
 		source := "created"
 		if body.URL != nil {
 			var err error
 			var imported importedConfig
 			imported, err = fetchImportConfig(r.Context(), *body.URL)
 			c = imported.Config
+			document = imported.Document
 			if err != nil {
 				fail(w, 400, err)
 				return
@@ -334,7 +343,9 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 			source = "network"
 		} else if body.Content != nil {
 			var err error
-			c, err = importConfig(*body.Content)
+			var imported importedConfig
+			imported, err = importProfileConfig(*body.Content)
+			c, document = imported.Config, imported.Document
 			if err != nil {
 				fail(w, 400, err)
 				return
@@ -364,7 +375,7 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 			fail(w, 500, err)
 			return
 		}
-		p := Profile{hex.EncodeToString(id), body.Name, c, source, time.Now().UTC()}
+		p := Profile{ID: hex.EncodeToString(id), Name: body.Name, Config: c, Source: source, Created: time.Now().UTC(), Full: document != "", Document: document}
 		old := a.state.Profiles
 		a.state.Profiles = append(a.state.Profiles, p)
 		if err := a.persist(); err != nil {
@@ -372,7 +383,7 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 			fail(w, 500, err)
 			return
 		}
-		reply(w, 201, p)
+		reply(w, 201, publicProfile(p))
 	})
 	mux.HandleFunc("POST /api/profiles/{id}/load", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
@@ -380,6 +391,10 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 		for _, p := range a.state.Profiles {
 			if p.ID != r.PathValue("id") {
 				continue
+			}
+			if p.Full {
+				fail(w, 409, errors.New("完整配置请在配置库中生成或应用，不能仅载入五项核心参数"))
+				return
 			}
 			old := a.state.Config
 			a.state.Config = p.Config

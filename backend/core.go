@@ -103,7 +103,7 @@ func (a *App) queueCore() (int, error) {
 	if _, err := rand.Read(id); err != nil {
 		return 500, err
 	}
-	a.state.Jobs = append(a.state.Jobs, Job{hex.EncodeToString(id), "install-core", "queued", "Waiting to install and start Mihomo core", time.Now().UTC(), a.state.Config})
+	a.state.Jobs = append(a.state.Jobs, Job{ID: hex.EncodeToString(id), Action: "install-core", Status: "queued", Message: "Waiting to install and start Mihomo core", Created: time.Now().UTC(), Config: a.state.Config})
 	if err := a.persist(); err != nil {
 		a.state.Jobs = a.state.Jobs[:len(a.state.Jobs)-1]
 		return 500, err

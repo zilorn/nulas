@@ -1,7 +1,7 @@
 # Nulas project instructions
 
 ## Purpose and stack
-Nulas is a browser-based quick configuration dashboard for https://github.com/MetaCubeX/mihomo/tree/Meta. It is an independent web frontend integrating the Mihomo REST API. The frontend uses Vite, SolidStart 2 with SSR, SolidJS, TypeScript and CSS. The backend uses Go's standard library, an HTTP API, atomic JSON persistence and a single background worker. It generates Mihomo-compatible configuration and optionally applies it to an existing Mihomo controller.
+Nulas is a browser-based quick configuration dashboard for https://github.com/MetaCubeX/mihomo/tree/Meta. It is an independent web frontend integrating the Mihomo REST API. The frontend uses Vite, SolidStart 2 with SSR, SolidJS, TypeScript and CSS. The backend uses Go's standard library plus go.yaml.in/yaml/v3 for configuration parsing, an HTTP API, atomic JSON persistence and a single background worker. It generates Mihomo-compatible configuration and optionally applies it to an existing Mihomo controller.
 
 ## Commands
 - `cd web && pnpm install --frozen-lockfile`: install locked frontend dependencies.
@@ -24,7 +24,7 @@ Nulas is a browser-based quick configuration dashboard for https://github.com/Me
 - Keep controller credentials on the server. Keep loopback binding and same-origin API defaults; remote deployment requires separately implemented authentication and TLS.
 - Preserve atomic persistence, bounded requests, validation, durable job snapshots and visible failure states. Background operations must not depend on an open browser.
 - An interrupted running job must be marked failed on restart, never blindly replay an external side effect. Pending jobs may resume.
-- Node management reads the connected core and selects members of existing manual proxy groups. This starter does not implement subscriptions, node creation/editing/deletion, privileged system proxy/TUN control, or full Mihomo configuration management. Document such limitations honestly.
+- Node management reads the connected core and selects members of existing manual proxy groups. Full Mihomo YAML/JSON profiles can be imported, generated and explicitly applied with durable document snapshots. Keep document credentials server-side and use loopback, non-privileged application settings without changing controller credentials or active TUN/transparent-proxy sessions. This starter does not implement subscription auto-refresh, node creation/editing/deletion, privileged system proxy/TUN control, or full configuration editing. Document such limitations honestly.
 
 ## Completion and Git
 Run relevant checks and document any unavailable verification. Commit completed work using `feat: <message>`, `fix: <message>` or `docs: <message>` with English messages. Add concise implementation details to the commit body when useful. Split very large tasks into coherent commits. After committing, report the commit hashes and messages to the user in a table. Do not amend or discard unrelated user work.
