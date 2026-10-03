@@ -193,6 +193,10 @@ func (a *App) systemRoutes(mux *http.ServeMux) {
 	})
 }
 func (a *App) setSystemProxy(enable bool) error {
+	return a.configureSystemProxy(enable, false)
+}
+
+func (a *App) configureSystemProxy(enable, restore bool) error {
 	a.controlMu.Lock()
 	defer a.controlMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -202,6 +206,7 @@ func (a *App) setSystemProxy(enable bool) error {
 	}
 	a.mu.Lock()
 	backup := a.state.ProxyBackup
+	previousPort := a.state.ProxyPort
 	controller := a.controller
 	a.mu.Unlock()
 	if !enable {
@@ -210,7 +215,7 @@ func (a *App) setSystemProxy(enable bool) error {
 		}
 		return a.restoreProxy(ctx, backup)
 	}
-	if len(backup) > 0 {
+	if len(backup) > 0 && !restore {
 		return errors.New("已有系统代理快照，请先关闭恢复后重试")
 	}
 	u, err := url.Parse(controller)
@@ -231,13 +236,16 @@ func (a *App) setSystemProxy(enable bool) error {
 		return errors.New("内核代理端口不可达，未更改系统代理")
 	}
 	conn.Close()
-	backup = map[string]string{}
-	for _, key := range proxyKeys {
-		v, err := a.proxyGet(ctx, key)
-		if err != nil {
-			return err
+	previousBackup := backup
+	if len(backup) == 0 {
+		backup = map[string]string{}
+		for _, key := range proxyKeys {
+			v, err := a.proxyGet(ctx, key)
+			if err != nil {
+				return err
+			}
+			backup[key] = v
 		}
-		backup[key] = v
 	}
 	// Persist recovery data before any external side effect. Interrupted jobs are never replayed.
 	a.mu.Lock()
@@ -245,8 +253,8 @@ func (a *App) setSystemProxy(enable bool) error {
 	a.state.ProxyPort = config.Port
 	err = a.persist()
 	if err != nil {
-		a.state.ProxyBackup = nil
-		a.state.ProxyPort = 0
+		a.state.ProxyBackup = previousBackup
+		a.state.ProxyPort = previousPort
 	}
 	a.mu.Unlock()
 	if err != nil {

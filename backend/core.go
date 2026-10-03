@@ -104,6 +104,11 @@ func (a *App) ensureCore(w http.ResponseWriter, r *http.Request) {
 
 // Caller holds the state lock. Failed/interrupted jobs require an explicit retry.
 func (a *App) queueCore() (int, error) {
+	return a.queueCoreWithPriority(false)
+}
+
+// Startup must connect the managed core before resuming pending network jobs.
+func (a *App) queueCoreWithPriority(startup bool) (int, error) {
 	status := a.coreStatus()
 	if status.Status != "missing" && !(status.Status == "installed" && a.managedContext != nil) {
 		return 200, nil
@@ -115,9 +120,25 @@ func (a *App) queueCore() (int, error) {
 	if _, err := rand.Read(id); err != nil {
 		return 500, err
 	}
-	a.state.Jobs = append(a.state.Jobs, Job{ID: hex.EncodeToString(id), Action: "install-core", Status: "queued", Message: "Waiting to install and start Mihomo core", Created: time.Now().UTC(), Config: a.state.Config})
+	j := Job{ID: hex.EncodeToString(id), Action: "install-core", Status: "queued", Message: "Waiting to install and start Mihomo core", Created: time.Now().UTC(), Config: a.state.Config}
+	previous := a.state.Jobs
+	if startup {
+		idx := len(previous)
+		for i, pending := range previous {
+			if pending.Status == "queued" {
+				idx = i
+				break
+			}
+		}
+		a.state.Jobs = make([]Job, 0, len(previous)+1)
+		a.state.Jobs = append(a.state.Jobs, previous[:idx]...)
+		a.state.Jobs = append(a.state.Jobs, j)
+		a.state.Jobs = append(a.state.Jobs, previous[idx:]...)
+	} else {
+		a.state.Jobs = append(a.state.Jobs, j)
+	}
 	if err := a.persist(); err != nil {
-		a.state.Jobs = a.state.Jobs[:len(a.state.Jobs)-1]
+		a.state.Jobs = previous
 		return 500, err
 	}
 	select {

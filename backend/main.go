@@ -31,6 +31,7 @@ type Config struct {
 	Log  string `json:"log-level"`
 }
 type Job struct {
+	Restore     bool      `json:"restore,omitempty"`
 	CoreVersion string    `json:"coreVersion,omitempty"`
 	ID          string    `json:"id"`
 	Action      string    `json:"action"`
@@ -58,6 +59,7 @@ type State struct {
 	ProxyPort   int               `json:"proxyPort,omitempty"`
 }
 type App struct {
+	networkRestore                           map[string]string
 	updateHome, updateScript, runningRelease string
 	updateCommand                            cliRunner
 	mu                                       sync.Mutex
@@ -169,6 +171,7 @@ func newApp(dir, controller, secret string) (*App, error) {
 	if err = a.persist(); err != nil {
 		return nil, err
 	}
+	a.prepareNetworkRestore()
 	return a, nil
 }
 func reply(w http.ResponseWriter, status int, value any) {
@@ -376,7 +379,7 @@ func (a *App) runJob(j Job) error {
 		return a.switchCore(j)
 	}
 	if j.Action == "proxy-enable" || j.Action == "proxy-disable" {
-		return a.setSystemProxy(j.Action == "proxy-enable")
+		return a.configureSystemProxy(j.Action == "proxy-enable", j.Restore)
 	}
 	if j.Action == "tun-enable" || j.Action == "tun-disable" {
 		return a.setTUN(j.Action == "tun-enable")
@@ -515,6 +518,9 @@ func (a *App) process() bool {
 		a.state.Jobs[idx].Status = "failed"
 		a.state.Jobs[idx].Message = err.Error()
 	}
+	if j.Restore {
+		a.state.Jobs[idx].Message = "启动恢复：" + a.state.Jobs[idx].Message
+	}
 	previousProfiles := append([]Profile(nil), a.state.Profiles...)
 	if j.Action == "refresh-profile" {
 		for i := range a.state.Profiles {
@@ -564,6 +570,11 @@ func (a *App) worker(ctx context.Context) {
 	for {
 		a.scheduleProfileUpdates(time.Now().UTC())
 		for ctx.Err() == nil && a.process() {
+		}
+		if ctx.Err() == nil {
+			if err := a.queueNetworkRestore(); err != nil {
+				log.Printf("queue network preferences: %v", err)
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -618,7 +629,7 @@ func main() {
 	if a.controller == "" {
 		a.managedContext = ctx
 		a.mu.Lock()
-		if _, err := a.queueCore(); err != nil {
+		if _, err := a.queueCoreWithPriority(true); err != nil {
 			log.Printf("queue core: %v", err)
 		}
 		a.mu.Unlock()

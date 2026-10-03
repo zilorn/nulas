@@ -67,7 +67,7 @@ export default function SystemSettings() {
  }
  const preferenceNote = (key: "proxy" | "tun" | "startup", actual?: boolean) => {
   const saved = preferences()?.[key];
-  return saved === undefined ? "" : `已保存偏好：${saved ? "开启" : "关闭"}。${saved !== actual ? "实际状态与偏好不同；请检查状态后手动操作。" : ""}`;
+  return saved === undefined ? "" : `已保存偏好：${saved ? "开启" : "关闭"}。${saved !== actual ? "实际状态与偏好不同；请查看后台任务的恢复进度或失败原因。" : ""}`;
  };
  return <section class="system-settings" aria-label="系统设置">
   <h3>系统设置</h3>
@@ -79,7 +79,7 @@ export default function SystemSettings() {
    <button type="button" role="switch" aria-label="虚拟网卡模式" aria-checked={status()?.enabled ?? false} class="system-switch" disabled={busy() || pending() || !status()?.supported} onClick={() => void toggle(!status()?.enabled)}><span /></button>
   </div>
   <Show when={details()}><div class="system-details">
-   <p>{preferenceNote("tun", status()?.enabled)}</p><p role="status">{status()?.enabled ? "已开启" : status() ? "已关闭" : "状态未知"} · {status()?.message || "正在检查内核状态…"}</p><p>开启后接管本机网络路由。初始配置仅直连，节点与规则沿用当前内核配置，不劫持 DNS；服务重启后默认关闭；开启偏好会保存，但需手动再次开启。</p>
+   <p>{preferenceNote("tun", status()?.enabled)}</p><p role="status">{status()?.enabled ? "已开启" : status() ? "已关闭" : "状态未知"} · {status()?.message || "正在检查内核状态…"}</p><p>开启后接管本机网络路由。初始配置仅直连，节点与规则沿用当前内核配置，不劫持 DNS；服务重启后会在启动任务完成后自动恢复已保存的开启偏好；权限不足或上次操作失败、中断时需手动重试。</p>
    <Show when={status()?.commands.length}><p>在后端所在主机的终端执行（需要管理员密码）：</p><For each={status()?.commands}>{command => <pre><code>{command}</code></pre>}</For><p>授权后停止并重新启动原服务，再返回开启。容器还需提供网络权限与 /dev/net/tun；内核升级后需重新授权。</p></Show>
    <button type="button" class="secondary" disabled={busy()} onClick={() => void refresh()}>重新检查</button> <a href="/tasks">查看任务结果 ↗</a>
   </div></Show>
@@ -87,7 +87,7 @@ export default function SystemSettings() {
   <Show when={proxyDetails() || (system() && (!system()?.proxy.supported || system()?.proxy.recovery && !system()?.proxy.enabled))}><div class="system-details"><p>{system()?.proxy.message}</p><p>{preferenceNote("proxy", system()?.proxy.enabled)}</p><Show when={system()?.proxy.recovery && !system()?.proxy.enabled}><button type="button" class="secondary" disabled={busy() || pending()} onClick={() => void toggleProxy()}>恢复原代理设置</button></Show></div></Show>
   <div class="system-row"><span class="system-label">开机自启</span><button type="button" class="system-icon" aria-label="开机自启说明" aria-expanded={startupDetails()} onClick={() => setStartupDetails(!startupDetails())}>ⓘ</button><button type="button" role="switch" aria-label="开机自启" aria-checked={system()?.startup.enabled ?? false} class="system-switch" disabled={busy() || !system() || (!system()?.startup.supported && !system()?.startup.recovery)} onClick={() => void changeSystem("startup")}><span /></button></div>
   <Show when={startupDetails() || (system() && !system()?.startup.supported)}><div class="system-details"><p>{system()?.startup.message}</p><p>{preferenceNote("startup", system()?.startup.enabled)}</p></div></Show>
-  <p>系统代理、虚拟网卡与自启偏好随操作保存；网络操作失败或重启后以实际状态为准，不自动重放网络接管操作。</p>
+  <p>系统代理、虚拟网卡与自启偏好随操作保存；重启后自动恢复已保存的网络开启偏好，结果见后台任务；开关显示实际状态。失败或中断的操作需手动重试。</p>
   <Show when={notice()}><p role="status">{notice()}</p></Show><Show when={error()}><p role="alert" class="error">{error()}</p></Show>
  </section>;
 }
