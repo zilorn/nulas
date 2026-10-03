@@ -2,6 +2,24 @@
 
 基于 [MetaCubeX/mihomo · Meta](https://github.com/MetaCubeX/mihomo/tree/Meta) 的网页快速配置面板。使用 **Vite + SolidStart 2（SSR）+ SolidJS + TypeScript** 前端与 **Go** 后端，通过 Mihomo REST API 管理核心运行参数。当前为可运行的基础框架，未复制上游源码，不包含内核二进制。
 
+## 快速使用（Linux 后台服务）
+
+需要 Node.js 24+、pnpm、Go 1.23+、Python 3 和可用的用户级 systemd。以普通用户在项目根目录执行：
+
+```sh
+./scripts/build.sh           # 一键安装前端依赖、检查类型、构建前后端
+export PATH="$PWD/bin:$PATH" # 当前终端可直接使用 nulas
+nulas install               # 安装前后端组合服务，不自动启动
+nulas start                 # 同时启动后端与前端
+nulas status                # 查看组合服务状态
+```
+
+打开 [http://127.0.0.1:8080](http://127.0.0.1:8080)。使用 `nulas stop` 同时停止前后端，`nulas restart` 同时重启；`nulas --help` 查看命令。可将项目 `bin` 的绝对路径加入 shell 配置的 PATH，以便新终端直接使用 `nulas`。服务依赖当前项目路径和构建产物，请保留项目目录；更新代码后重新执行 `./scripts/build.sh` 与 `nulas restart`。迁移目录或更换 Node 路径后先重新执行 `nulas install`。
+
+默认后端会按需下载并启动托管 Mihomo；已有内核时，在启动服务前把 `MIHOMO_CONTROLLER` 和 `MIHOMO_SECRET` 等配置写入 `~/.config/nulas/service.env`，权限设为 `600`。安装器不会复制终端环境中的凭据。安装和构建不会启动服务或下载内核。CLI 仅管理当前用户的 Nulas 组合服务，开机自启另见下方“系统设置与前后端开机自启”。
+
+只需前台运行时，构建后执行 `./scripts/start.sh`；开发环境使用 `./scripts/dev.sh`，详见“本地启动”。
+
 ## 按需下载内核
 
 仓库不包含上游源码或二进制。已有内核时可直接连接；需要内核时运行（Python 3.10+）：
@@ -212,13 +230,26 @@ getcap /absolute/path/to/mihomo
 
 ```bash
 scripts/build.sh
-python3 scripts/install_service.py
+export PATH="$PWD/bin:$PATH"
+nulas install
 loginctl enable-linger
 ```
 
-`enable-linger` 可能需要主机管理员授权；应用不会代替用户提权。没有 linger 的用户服务只能保证登录后启动，因此页面不把它标为已开启机自启。安装脚本仅写入带 Nulas 标记的用户服务文件并重新加载，不开启、不启动、不停止现有服务，也不会覆盖其他来源的同名服务。安装后在网页开启“开机自启”，只改变下次开机的注册状态；关闭不会停止当前服务。迁移项目路径或更换 Node 安装位置后，重新运行安装脚本。
+`enable-linger` 可能需要主机管理员授权；应用不会代替用户提权。没有 linger 的用户服务只能保证登录后启动，因此页面不把它标为已开启机自启。安装脚本仅写入带 Nulas 标记的用户服务文件并重新加载，不开启、不启动、不停止现有服务，也不会覆盖其他来源的同名服务。安装后在网页开启“开机自启”，只改变下次开机的注册状态；关闭不会停止当前服务。迁移项目路径或更换 Node 安装位置后，重新运行 `nulas install`。CLI 安装复用原有 Python 安装器，需要 Python 3；仍可直接运行 `python3 scripts/install_service.py`。
 
 可选部署环境变量放入 `~/.config/nulas/service.env`（systemd EnvironmentFile 格式，权限设为 `600`）；例如 `NULAS_DATA_DIR`、`NULAS_ADDR`、`MIHOMO_CONTROLLER`、`MIHOMO_SECRET`。相对路径以启动脚本的 `backend/` 为基准，默认继续使用原 `backend/.data`。安装器记录 Node 的所在目录，不自动复制当前终端中的控制器凭据或其他环境变量。使用自定义部署配置时，先配置此文件再启用自启。不要把凭据文件提交到仓库。
+
+CLI 服务管理（Linux 普通用户，使用同一个 `nulas.service` 同时管理后端与 SSR 前端）：
+
+```bash
+nulas install  # 安装/更新服务，不启动或启用开机自启
+nulas status   # 查看服务状态与近期日志；未运行时返回非零退出码
+nulas start    # 启动前后端
+nulas stop     # 停止前后端
+nulas restart  # 重启前后端
+```
+
+这些命令可从任意目录运行；保留构建产物 `bin/nulas` 在项目中，可将项目的 `bin` 加入 shell 的 PATH，或在 PATH 目录创建指向它的符号链接。`nulas --help` 查看帮助；无参数运行仍只启动前台后端，`scripts/start.sh` 前台启动两项服务。安装服务后需要可用的用户 systemd 会话；不使用 `sudo nulas`。停止或重启会中断当前服务和托管内核，正在执行的任务重启后标记失败，待处理任务可以恢复；不会停止外部 Mihomo 控制器。CLI 不更改开机自启设置。命令报错返回非零退出码，不把失败显示为成功。旧的系统级双服务模板请继续使用对应的系统级管理命令，CLI 仅管理用户级组合服务。
 
 日志查看：`journalctl --user -u nulas.service`。手动启动已安装服务：`systemctl --user start nulas.service`，先停止原终端中的服务以免端口冲突。服务不自动打开浏览器，前后端任一项退出时停止另一项，再由 systemd 按失败重启策略管理。TUN 开启状态不会被自启重放。
 
@@ -233,6 +264,8 @@ API：`GET /api/runtime/system` 返回能力、实测状态与说明；`PUT /api
 配置管理显示最后成功应用的名称、核心参数、时间和“已应用 · 已保存”，对应库卡片也显示标记，页面每两秒更新状态。快速配置的应用结果即使没有配置库模板，也会在该页面独立显示。此状态表示 Nulas 最后成功应用的记录，外部修改内核不会同步；外部控制器的进程重启仍由其自身配置管理负责。托管启动继续使用回环监听、新生成的服务端密钥，TUN 与透明代理默认关闭，不恢复系统代理或重放其他系统操作。完整文档与凭据仍只保存在后端。
 
 验证：成功快照持久化、失败保留、完整配置与参数叠加、旧记录迁移、中断任务不重放、凭据隔离和启动安全设置测试通过；前端类型检查与生产构建、Go vet 和后端构建通过。Go race 全套中四项已有环境依赖测试受当前 9090 端口占用和运行中的 TUN 网卡影响，排除这四项后其余测试通过。未重启或重载实际运行内核，实际进程重启恢复尚未实机验证。
+
+CLI 验证：`./scripts/build.sh` 一键完成冻结依赖安装、TypeScript 检查、前端生产构建和后端构建；CLI 单元测试、Go vet、Python 安装器测试通过。构建后的二进制在临时配置目录和模拟 systemctl 下验证了 install/start/stop/restart/status、失败退出码、同名服务保护及不初始化后端数据。全量 Go race 测试有四个已有失败（`TestManagedCoreLifecycle`、`TestManagedCorePortConflict` 的 9090 端口占用，以及 `TestTUNDisableOnlyPatchesTUNAndVerifies`、`TestTUNFailedListenerCreationRollsBack` 的主机 TUN 状态影响），修改前版本同样复现；排除这四项后其余测试通过。未安装或启停主机真实服务，实际 systemd 生命周期仍需部署环境验证。
 
 ## 桌面托盘与开关保存
 

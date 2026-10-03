@@ -499,6 +499,9 @@ func env(key, fallback string) string {
 	return fallback
 }
 func main() {
+	if len(os.Args) > 1 {
+		os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr, execCLI, os.Executable))
+	}
 	a, e := newApp(env("NULAS_DATA_DIR", ".data"), os.Getenv("MIHOMO_CONTROLLER"), os.Getenv("MIHOMO_SECRET"))
 	if e != nil {
 		log.Fatal(e)

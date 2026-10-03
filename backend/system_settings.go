@@ -107,7 +107,7 @@ func (a *App) proxyStatus(ctx context.Context) SystemFeature {
 	return s
 }
 func (a *App) startupStatus(ctx context.Context) SystemFeature {
-	s := SystemFeature{Message: "需要 Linux 用户级 systemd 服务。先运行 python3 scripts/install_service.py 安装，再为服务用户启用 linger。"}
+	s := SystemFeature{Message: "需要 Linux 用户级 systemd 服务。先运行 nulas install 安装，再为服务用户启用 linger。"}
 	if runtime.GOOS != "linux" {
 		return s
 	}

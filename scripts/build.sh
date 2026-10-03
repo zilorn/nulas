@@ -18,4 +18,7 @@ pnpm build
 mkdir -p "$ROOT_DIR/bin"
 cd "$ROOT_DIR/backend"
 go build -o "$ROOT_DIR/bin/nulas" .
-printf '\n构建完成：%s/bin/nulas\nSSR 产物：%s/web/.output/\n启动：%s/scripts/start.sh\n' "$ROOT_DIR" "$ROOT_DIR" "$ROOT_DIR"
+printf '\n构建完成：%s/bin/nulas\nSSR 产物：%s/web/.output/\n' "$ROOT_DIR" "$ROOT_DIR"
+printf 'Linux 后台服务（普通用户，需要 Python 3 和用户级 systemd）：\n'
+printf '  %q install\n  %q start\n  %q status\n' "$ROOT_DIR/bin/nulas" "$ROOT_DIR/bin/nulas" "$ROOT_DIR/bin/nulas"
+printf '前台启动：%q\n' "$ROOT_DIR/scripts/start.sh"
