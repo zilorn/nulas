@@ -195,6 +195,7 @@ func (a *App) handler() http.Handler {
 	})
 	a.profileRoutes(mux)
 	a.nodeRoutes(mux)
+	a.tunRoutes(mux)
 	mux.HandleFunc("GET /api/jobs", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -213,7 +214,7 @@ func (a *App) handler() http.Handler {
 			fail(w, 400, e)
 			return
 		}
-		if body.Action != "generate" && body.Action != "apply" && body.Action != "install-core" {
+		if body.Action != "generate" && body.Action != "apply" && body.Action != "install-core" && body.Action != "tun-enable" && body.Action != "tun-disable" {
 			fail(w, 400, errors.New("invalid action"))
 			return
 		}
@@ -240,8 +241,8 @@ func (a *App) handler() http.Handler {
 		}
 		j := Job{ID: hex.EncodeToString(id), Action: body.Action, Status: "queued", Message: "Waiting for worker", Created: time.Now().UTC(), Config: a.state.Config}
 		if body.ProfileID != "" {
-			if body.Action == "install-core" {
-				fail(w, 400, errors.New("安装内核不能指定配置"))
+			if body.Action == "install-core" || body.Action == "tun-enable" || body.Action == "tun-disable" {
+				fail(w, 400, errors.New("内核与 TUN 操作不能指定配置"))
 				return
 			}
 			found := false
@@ -293,6 +294,9 @@ func (a *App) handler() http.Handler {
 	})
 }
 func (a *App) runJob(j Job) error {
+	if j.Action == "tun-enable" || j.Action == "tun-disable" {
+		return a.setTUN(j.Action == "tun-enable")
+	}
 	if j.Action == "install-core" {
 		if err := a.installCore(); err != nil {
 			return err
@@ -391,6 +395,12 @@ func (a *App) process() bool {
 		a.state.Jobs[idx].Message = "Runtime settings applied to Mihomo"
 		if j.Document != "" {
 			a.state.Jobs[idx].Message = "完整配置已应用：节点、代理组、规则与 DNS 已重载；使用本机监听，未启用 TUN、透明代理或系统代理"
+		}
+	}
+	if j.Action == "tun-enable" || j.Action == "tun-disable" {
+		a.state.Jobs[idx].Message = "TUN 已关闭并检查"
+		if j.Action == "tun-enable" {
+			a.state.Jobs[idx].Message = "TUN 已开启，内核配置与网卡已检查"
 		}
 	}
 	if err != nil {
