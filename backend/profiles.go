@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const networkImportTimeout = 15 * time.Second
@@ -80,7 +81,7 @@ func importNamedConfig(content string) (importedConfig, error) {
 		}
 	} else {
 		fields = make(map[string]json.RawMessage)
-		for _, line := range strings.Split(content, "\n") {
+		for lineNumber, line := range strings.Split(content, "\n") {
 			line = strings.TrimSuffix(line, "\r")
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
@@ -91,7 +92,7 @@ func importNamedConfig(content string) (importedConfig, error) {
 			}
 			key, value, ok := strings.Cut(trimmed, ":")
 			if !ok {
-				return c, errors.New("YAML 配置格式不正确")
+				return c, fmt.Errorf("第 %d 行无法识别为 YAML 键值；请确认内容为 YAML/JSON 核心参数配置，而非网页或订阅", lineNumber+1)
 			}
 			key = strings.TrimSpace(key)
 			if _, exists := fields[key]; exists {
@@ -163,6 +164,10 @@ func importNamedConfig(content string) (importedConfig, error) {
 // Subscription links are not core-setting documents. Inspect decoded content only
 // to identify the format; never return node links or credentials in errors.
 func unsupportedImportFormat(content string) error {
+	prefix := strings.ToLower(strings.TrimSpace(content))
+	if strings.HasPrefix(prefix, "<!doctype html") || strings.HasPrefix(prefix, "<html") || strings.HasPrefix(prefix, "<head") || strings.HasPrefix(prefix, "<body") {
+		return errors.New("导入内容是 HTML 网页，不是 YAML/JSON 核心配置；请使用文件直链，检查是否返回登录页或错误页面")
+	}
 	if isNodeSubscription(content) {
 		return errors.New("导入内容是节点订阅链接，不是 YAML/JSON 核心配置；当前不支持节点订阅，请提供仅含核心参数的配置文件")
 	}
@@ -179,6 +184,9 @@ func unsupportedImportFormat(content string) error {
 	}, content)
 	for _, encoding := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
 		decoded, err := encoding.DecodeString(compact)
+		if err == nil && !utf8.Valid(decoded) {
+			return errors.New("导入内容是 Base64 编码的二进制数据，不是 YAML/JSON 文本；可能经过加密或其他封装，请确认服务提供的 Mihomo/Clash 配置地址")
+		}
 		if err == nil && isNodeSubscription(string(decoded)) {
 			return errors.New("导入内容是 Base64 编码的节点订阅，不是 YAML/JSON 核心配置；当前不支持节点订阅，请提供仅含核心参数的配置文件")
 		}
@@ -227,6 +235,9 @@ func fetchImportConfig(ctx context.Context, raw string) (importedConfig, error) 
 	if err != nil {
 		return importedConfig{}, errors.New("配置地址无效")
 	}
+	// Request a Clash/Mihomo representation instead of the generic Go client
+	// response; providers may select a different format by User-Agent.
+	req.Header.Set("User-Agent", "clash.meta")
 	req.Header.Set("Accept", "application/yaml, application/json, text/yaml, text/plain")
 	// Separate direct client: no controller credentials or proxy dependency.
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -256,7 +267,11 @@ func fetchImportConfig(ctx context.Context, raw string) (importedConfig, error) 
 	if err != nil {
 		return importedConfig{}, errors.New("配置下载未完成，请重试")
 	}
-	return importNamedConfig(string(content))
+	imported, err := importNamedConfig(string(content))
+	if err != nil {
+		return importedConfig{}, fmt.Errorf("下载内容无法作为核心配置导入：%w", err)
+	}
+	return imported, nil
 }
 
 func (a *App) profileRoutes(mux *http.ServeMux) {

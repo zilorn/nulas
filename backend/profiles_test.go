@@ -332,3 +332,52 @@ func TestSubscriptionImportErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNetworkImportFormatDiagnostics(t *testing.T) {
+	for _, tc := range []struct{ name, content, want string }{
+		{"html", "<!DOCTYPE html><html><body>private-token</body></html>", "HTML 网页"},
+		{"html without doctype", "\ufeff  <HTML><body>private-token</body></HTML>", "HTML 网页"},
+		{"unknown format", "# comment\nprivate-token", "第 2 行"},
+		{"binary base64", base64.StdEncoding.EncodeToString([]byte{0xff, 0x00, 0xfa}), "Base64 编码的二进制数据"},
+		{"invalid json", "{private-token}", "JSON 配置格式不正确"},
+		{"unsupported full config", "proxies: []", "不支持字段"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, tc.content)
+			}))
+			defer server.Close()
+			a := testApp(t, "")
+			body, _ := json.Marshal(map[string]string{"url": server.URL + "?token=private-token"})
+			w := request(a, "POST", "/api/profiles", string(body))
+			if w.Code != 400 || !strings.Contains(w.Body.String(), "下载内容无法作为核心配置导入") || !strings.Contains(w.Body.String(), tc.want) {
+				t.Fatalf("%d %s", w.Code, w.Body.String())
+			}
+			if strings.Contains(w.Body.String(), "private-token") || len(a.state.Profiles) != 0 {
+				t.Fatal("failed import leaked content or changed state")
+			}
+		})
+	}
+}
+
+func TestNetworkImportRequestsClashRepresentation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("User-Agent") != "clash.meta" {
+			t.Errorf("unexpected User-Agent: %q", r.Header.Get("User-Agent"))
+			fmt.Fprint(w, base64.StdEncoding.EncodeToString([]byte{0xff, 0x00, 0xfa}))
+			return
+		}
+		if r.URL.Path == "/redirect" {
+			http.Redirect(w, r, "/config", http.StatusFound)
+			return
+		}
+		fmt.Fprint(w, "mode: direct\nmixed-port: 8888")
+	}))
+	defer server.Close()
+	for _, path := range []string{"/config", "/redirect"} {
+		c, err := fetchImportConfig(context.Background(), server.URL+path)
+		if err != nil || c.Mode != "direct" || c.Port != 8888 {
+			t.Fatalf("%s: %+v %v", path, c, err)
+		}
+	}
+}
