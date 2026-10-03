@@ -31,14 +31,15 @@ type Config struct {
 	Log  string `json:"log-level"`
 }
 type Job struct {
-	ID        string    `json:"id"`
-	Action    string    `json:"action"`
-	Status    string    `json:"status"`
-	Message   string    `json:"message"`
-	Created   time.Time `json:"created"`
-	Config    Config    `json:"config"`
-	ProfileID string    `json:"profileId,omitempty"`
-	Document  string    `json:"document,omitempty"`
+	ID         string    `json:"id"`
+	Action     string    `json:"action"`
+	Status     string    `json:"status"`
+	Message    string    `json:"message"`
+	Created    time.Time `json:"created"`
+	Config     Config    `json:"config"`
+	ProfileID  string    `json:"profileId,omitempty"`
+	Document   string    `json:"document,omitempty"`
+	RefreshURL string    `json:"refreshURL,omitempty"`
 }
 type Preferences struct {
 	Tray    bool  `json:"tray"`
@@ -147,6 +148,14 @@ func newApp(dir, controller, secret string) (*App, error) {
 		if a.state.Jobs[i].Status == "running" {
 			a.state.Jobs[i].Status = "failed"
 			a.state.Jobs[i].Message = "Backend interrupted; inspect core state before retrying"
+			if a.state.Jobs[i].Action == "refresh-profile" {
+				for k := range a.state.Profiles {
+					if a.state.Profiles[k].ID == a.state.Jobs[i].ProfileID {
+						a.state.Profiles[k].RefreshStatus = "failed"
+						a.state.Profiles[k].RefreshMessage = "更新被服务重启中断，已保留原配置"
+					}
+				}
+			}
 		}
 	}
 	if err = a.persist(); err != nil {
@@ -226,10 +235,11 @@ func (a *App) handler() http.Handler {
 			return
 		}
 		value := *a.state.Applied
-		value.Document = ""
+		value.Profile = publicProfile(value.Profile)
 		reply(w, 200, value)
 	})
 	a.profileRoutes(mux)
+	a.profileUpdateRoutes(mux)
 	a.nodeRoutes(mux)
 	a.tunRoutes(mux)
 	a.systemRoutes(mux)
@@ -433,7 +443,16 @@ func (a *App) process() bool {
 	}
 	j := a.state.Jobs[idx]
 	a.mu.Unlock()
-	err := a.runJob(j)
+	var imported importedConfig
+	var err error
+	if j.Action == "refresh-profile" {
+		imported, err = fetchImportConfig(context.Background(), j.RefreshURL)
+		if err != nil {
+			err = errors.New("配置更新失败：下载或校验未通过，请检查更新地址与网络；已保留原配置")
+		}
+	} else {
+		err = a.runJob(j)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.state.Jobs[idx].Status = "succeeded"
@@ -466,14 +485,42 @@ func (a *App) process() bool {
 		a.state.Jobs[idx].Status = "failed"
 		a.state.Jobs[idx].Message = err.Error()
 	}
+	previousProfiles := append([]Profile(nil), a.state.Profiles...)
+	if j.Action == "refresh-profile" {
+		for i := range a.state.Profiles {
+			p := &a.state.Profiles[i]
+			if p.ID != j.ProfileID {
+				continue
+			}
+			p.RefreshStatus = a.state.Jobs[idx].Status
+			p.RefreshMessage = a.state.Jobs[idx].Message
+			if err == nil {
+				p.Config, p.Document, p.Full = imported.Config, imported.Document, imported.Document != ""
+				now := time.Now().UTC()
+				p.UpdatedAt = &now
+				p.RefreshMessage = "配置已更新；尚未应用到内核"
+				a.state.Jobs[idx].Message = p.RefreshMessage
+			}
+		}
+	}
 	previous := a.state.Applied
 	if err == nil && j.Action == "apply" {
 		a.state.Applied = a.appliedSnapshot(j)
 	}
 	if e := a.persist(); e != nil {
 		a.state.Applied = previous
+		a.state.Profiles = previousProfiles
 		a.state.Jobs[idx].Status = "failed"
 		a.state.Jobs[idx].Message = "内核已执行操作，但保存结果失败；请检查内核状态后重试"
+		if j.Action == "refresh-profile" {
+			a.state.Jobs[idx].Message = "保存更新结果失败，已保留原配置"
+			for i := range a.state.Profiles {
+				if a.state.Profiles[i].ID == j.ProfileID {
+					a.state.Profiles[i].RefreshStatus = "failed"
+					a.state.Profiles[i].RefreshMessage = a.state.Jobs[idx].Message
+				}
+			}
+		}
 		log.Printf("persist completed job: %v", e)
 	}
 	return true
@@ -482,6 +529,7 @@ func (a *App) worker(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
+		a.scheduleProfileUpdates(time.Now().UTC())
 		for ctx.Err() == nil && a.process() {
 		}
 		select {

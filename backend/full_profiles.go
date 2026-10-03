@@ -94,8 +94,13 @@ func parseFullDocument(content string) (map[string]any, error) {
 	return fields, nil
 }
 
-func publicProfile(p Profile) Profile { p.Document = ""; return p }
-func publicJob(j Job) Job             { j.Document = ""; return j }
+func publicProfile(p Profile) Profile {
+	p.Document = ""
+	p.Refreshable = p.RefreshURL != ""
+	p.RefreshURL = ""
+	return p
+}
+func publicJob(j Job) Job { j.Document = ""; j.RefreshURL = ""; return j }
 
 // Applying a full profile is explicit. Original configuration is preserved for
 // export; only the applied copy uses loopback listeners and disables privileged

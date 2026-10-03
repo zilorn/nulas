@@ -168,8 +168,8 @@ func TestNetworkImport(t *testing.T) {
 		t.Fatalf("persistence: %v", err)
 	}
 	persisted, err := os.ReadFile(filepath.Join(a.dir, "state.json"))
-	if err != nil || strings.Contains(string(persisted), "private-token") || strings.Contains(string(persisted), server.URL) {
-		t.Fatal("URL persisted", err)
+	if err != nil || !strings.Contains(string(persisted), "private-token") || !strings.Contains(string(persisted), server.URL) {
+		t.Fatal("private update URL not persisted", err)
 	}
 	for _, path := range []string{"/loop", "/large", "/chunked", "/unsupported", "/empty", "/missing"} {
 		body, _ := json.Marshal(map[string]string{"name": "Failure", "url": server.URL + path + "?token=private-token"})

@@ -20,13 +20,20 @@ import (
 const networkImportTimeout = 15 * time.Second
 
 type Profile struct {
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	Config   Config    `json:"config"`
-	Source   string    `json:"source"`
-	Created  time.Time `json:"created"`
-	Full     bool      `json:"full,omitempty"`
-	Document string    `json:"document,omitempty"`
+	ID                  string     `json:"id"`
+	Name                string     `json:"name"`
+	Config              Config     `json:"config"`
+	Source              string     `json:"source"`
+	Created             time.Time  `json:"created"`
+	Full                bool       `json:"full,omitempty"`
+	Document            string     `json:"document,omitempty"`
+	RefreshURL          string     `json:"refreshURL,omitempty"`
+	Refreshable         bool       `json:"refreshable"`
+	UpdateIntervalHours int        `json:"updateIntervalHours"`
+	NextUpdate          *time.Time `json:"nextUpdate,omitempty"`
+	UpdatedAt           *time.Time `json:"updatedAt,omitempty"`
+	RefreshStatus       string     `json:"refreshStatus,omitempty"`
+	RefreshMessage      string     `json:"refreshMessage,omitempty"`
 }
 
 type importedConfig struct {
@@ -218,7 +225,7 @@ func isNodeSubscription(content string) bool {
 	return found
 }
 
-// URLs may contain tokens: never persist them or include them in errors.
+// URLs may contain tokens: retain them only in private server state, never in API responses or errors.
 func validateImportURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Fragment != "" || len(raw) > 4096 {
@@ -293,13 +300,22 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("POST /api/profiles", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Name    string  `json:"name"`
-			Config  *Config `json:"config"`
-			Content *string `json:"content"`
-			URL     *string `json:"url"`
+			Name                string  `json:"name"`
+			Config              *Config `json:"config"`
+			Content             *string `json:"content"`
+			URL                 *string `json:"url"`
+			UpdateIntervalHours int     `json:"updateIntervalHours"`
 		}
 		if err := decodeJSON(r.Body, &body); err != nil {
 			fail(w, 400, err)
+			return
+		}
+		if err := validateUpdateInterval(body.UpdateIntervalHours); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		if body.UpdateIntervalHours != 0 && body.URL == nil {
+			fail(w, 400, errors.New("定时更新需要网络配置地址"))
 			return
 		}
 		body.Name = strings.TrimSpace(body.Name)
@@ -376,6 +392,12 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 			return
 		}
 		p := Profile{ID: hex.EncodeToString(id), Name: body.Name, Config: c, Source: source, Created: time.Now().UTC(), Full: document != "", Document: document}
+		if body.URL != nil {
+			p.RefreshURL = strings.TrimSpace(*body.URL)
+			p.UpdatedAt = &p.Created
+			p.UpdateIntervalHours = body.UpdateIntervalHours
+			p.NextUpdate = nextProfileUpdate(p.Created, p.UpdateIntervalHours)
+		}
 		old := a.state.Profiles
 		a.state.Profiles = append(a.state.Profiles, p)
 		if err := a.persist(); err != nil {
