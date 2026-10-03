@@ -61,7 +61,7 @@ export default function Nodes() {
  }
 
  const query = createMemo(() => search().trim().toLowerCase());
- const groups = createMemo(() => visibleGroups(nodes(), mode()));
+ const groups = createMemo(() => visibleGroups(nodes(), mode(), fallback()?.target));
  const filtered = createMemo(() => groups().filter(p => p.name.toLowerCase().includes(query()) || p.all?.some(n => n.toLowerCase().includes(query()))));
  const activeGroup = createMemo(() => filtered().find(p => p.name === activeName()) || filtered().find(p => p.type === "Selector") || filtered()[0]);
  const members = (group: Proxy) => group.name.toLowerCase().includes(query()) ? group.all || [] : (group.all || []).filter(name => name.toLowerCase().includes(query()));

@@ -29,3 +29,22 @@ test("direct and unknown modes cannot expose or select proxy groups", () => {
   for (const group of nodes) assert.equal(canChoose(group, mode), false);
  }
 });
+
+test("rule mode places the MATCH target first and preserves other group order", () => {
+ const list: Proxy[] = [...nodes, { name: "Other", type: "Selector", all: ["节点 A"] }];
+ assert.deepEqual(visibleGroups(list, "rule", "海外使用").map(p => p.name), ["海外使用", "ChatGPT", "Other"]);
+ assert.deepEqual(list.map(p => p.name), ["ChatGPT", "GLOBAL", "海外使用", "节点 A", "Other"]);
+});
+
+test("missing or non-group MATCH targets preserve the configured order", () => {
+ for (const target of [undefined, "DIRECT", "节点 A", "missing", "GLOBAL", "ChatGPT"]) {
+  assert.deepEqual(visibleGroups(nodes, "rule", target).map(p => p.name), ["ChatGPT", "海外使用"]);
+ }
+});
+
+test("MATCH targets do not change other modes", () => {
+ assert.deepEqual(visibleGroups(nodes, "global", "海外使用").map(p => p.name), ["GLOBAL"]);
+ for (const mode of ["direct", "", "unknown"]) {
+  assert.deepEqual(visibleGroups(nodes, mode, "海外使用"), []);
+ }
+});
