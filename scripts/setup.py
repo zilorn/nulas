@@ -2,6 +2,7 @@
 """User-local installation, staged updates, and cross-platform foreground runner."""
 import argparse
 import contextlib
+import errno
 import hashlib
 import ipaddress
 import json
@@ -56,14 +57,42 @@ def load(home):
 def locked(home):
     home.mkdir(parents=True, exist_ok=True)
     path = home / '.update-lock'
-    try:
-        path.mkdir()
-    except FileExistsError:
-        raise RuntimeError('Another installation/update is active. After an interrupted update, inspect and remove ' + str(path))
-    try:
-        yield
-    finally:
-        path.rmdir()
+    # A legacy mkdir lock has no owner information. Never steal it from an
+    # updater running an older release; recovery requires an explicit check.
+    if path.is_dir():
+        raise RuntimeError('Legacy installation/update directory lock: confirm no installation/update '
+                           'process is running, then remove the empty directory ' + str(path))
+    if path.is_symlink():
+        raise RuntimeError('Refusing a symlinked installation/update lock: ' + str(path))
+    # Never unlink this inode: contenders must always lock the same file. The
+    # OS closes this non-inherited handle on forced termination and process
+    # exit, even when an updater is still running in a daemon thread.
+    with path.open('a+b') as stream:
+        if os.name == 'nt':
+            import msvcrt
+            # Windows needs a byte to lock. Never truncate a holder's file.
+            if os.fstat(stream.fileno()).st_size == 0:
+                stream.write(b'\0')
+                stream.flush()
+            stream.seek(0)
+            acquire = lambda: msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            acquire = lambda: fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            acquire()
+        except OSError as error:
+            if error.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                raise RuntimeError('Another installation/update is active: ' + str(path)) from error
+            raise
+        try:
+            yield
+        finally:
+            if os.name == 'nt':
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 def download(url):

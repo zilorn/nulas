@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 import setup
@@ -80,7 +81,81 @@ class SetupTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     with setup.locked(home):
                         pass
-            self.assertFalse((home / '.update-lock').exists())
+            self.assertTrue((home / '.update-lock').is_file())
+
+    def lock_process(self, home, daemon=False):
+        script = (
+            "import pathlib, sys, threading, time, setup\n"
+            "def hold():\n"
+            "    with setup.locked(pathlib.Path(sys.argv[1])):\n"
+            "        print('locked', flush=True)\n"
+            "        time.sleep(60)\n"
+        )
+        script += ("threading.Thread(target=hold, daemon=True).start()\nsys.stdin.readline()\n"
+                   if daemon else "hold()\n")
+        process = subprocess.Popen([sys.executable, '-c', script, str(home)],
+                                   cwd=Path(setup.__file__).parent, stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(self.stop_lock_process, process)
+        ready = []
+        reader = threading.Thread(target=lambda: ready.append(process.stdout.readline()), daemon=True)
+        reader.start()
+        reader.join(timeout=10)
+        self.assertEqual(ready, ['locked\n'])
+        return process
+
+    @staticmethod
+    def stop_lock_process(process):
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=10)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close()
+
+    def test_lock_releases_after_killed_process(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            process = self.lock_process(home)
+            with self.assertRaisesRegex(RuntimeError, 'Another installation/update'):
+                with setup.locked(home):
+                    self.fail('entered while another process holds the lock')
+            process.kill()  # SIGKILL on POSIX, TerminateProcess on Windows
+            process.wait(timeout=10)
+            with setup.locked(home):
+                pass
+
+    def test_lock_releases_when_process_exits_with_daemon_updater(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            process = self.lock_process(home, daemon=True)
+            process.stdin.write('stop\n')
+            process.stdin.flush()
+            self.assertEqual(process.wait(timeout=10), 0)
+            with setup.locked(home):
+                pass
+
+    def test_lock_releases_after_exception_and_retains_same_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            with self.assertRaisesRegex(RuntimeError, 'build failed'):
+                with setup.locked(home):
+                    original = (home / '.update-lock').stat().st_ino
+                    raise RuntimeError('build failed')
+            with setup.locked(home):
+                self.assertEqual((home / '.update-lock').stat().st_ino, original)
+
+    def test_legacy_directory_lock_requires_explicit_recovery(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            path = home / '.update-lock'
+            path.mkdir()
+            with self.assertRaisesRegex(RuntimeError, 'confirm no installation/update process'):
+                with setup.locked(home):
+                    self.fail('cannot determine whether a legacy updater is alive')
+            self.assertTrue(path.is_dir())
+            path.rmdir()  # Explicit legacy recovery; later locks are OS-managed.
+            with setup.locked(home):
+                pass
 
     def test_shell_paths_preserve_existing_content_and_are_idempotent(self):
         with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {}, clear=True):
@@ -356,7 +431,7 @@ class SetupTests(unittest.TestCase):
             for name in ('data', 'runtime'):
                 self.assertEqual((home / name / 'keep').read_text(), name)
             self.assertEqual((home / 'custom-file').read_text(), 'keep')
-            for name in ('source', 'releases', 'tools', 'bin', 'installation.json', '.update-lock'):
+            for name in ('source', 'releases', 'tools', 'bin', 'installation.json'):
                 self.assertFalse((home / name).exists())
 
     def test_remove_rejects_invalid_paths_locks_and_stop_failures(self):
@@ -368,8 +443,12 @@ class SetupTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'Current release'):
                     setup.remove(home)
                 setup.atomic_json(home / 'installation.json', {'current': str(release)})
+                with setup.locked(home):
+                    with self.assertRaisesRegex(RuntimeError, 'Another installation/update'):
+                        setup.remove(home)
+                (home / '.update-lock').unlink()
                 (home / '.update-lock').mkdir()
-                with self.assertRaisesRegex(RuntimeError, 'Another installation'):
+                with self.assertRaisesRegex(RuntimeError, 'Legacy installation/update'):
                     setup.remove(home)
                 (home / '.update-lock').rmdir()
                 (home / '.git').mkdir()
@@ -416,7 +495,7 @@ class SetupTests(unittest.TestCase):
                 with self.assertRaisesRegex(OSError, 'file in use'):
                     setup.remove(home)
                 self.assertTrue((home / 'installation.json').exists())
-                self.assertFalse((home / '.update-lock').exists())
+                self.assertTrue((home / '.update-lock').is_file())
                 output.assert_not_called()
 
     def test_launcher_remove_bypasses_running_binary(self):
