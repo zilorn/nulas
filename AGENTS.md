@@ -36,6 +36,9 @@ Nulas is a browser-based quick configuration dashboard for https://github.com/Me
 ## Completion and Git
 Run relevant checks and document any unavailable verification. Commit completed work using `feat: <message>`, `fix: <message>` or `docs: <message>` with English messages. Add concise implementation details to the commit body when useful. Split very large tasks into coherent commits. After committing, report the commit hashes and messages to the user in a table. Do not amend or discard unrelated user work.
 
+## Worktree tasks
+- A request that starts with `wt:` is a worktree directive; use the project skill `.agents/skills/nulas-worktree/SKILL.md`. Work in `.worktrees/<slug>` on branch `wt/<slug>`, commit with the usual conventional messages, rebase onto `main`, fast-forward `main`, then remove the worktree and delete the branch, leaving nothing behind.
+
 ## Localization
 - Use the project skill `.agents/skills/nulas-i18n/SKILL.md` when adding interface copy or changing language support. Keep Chinese and English translations, accessibility labels and locale-aware dates in sync.
 - `cd web && pnpm test:i18n`: verify locale selection, translation coverage and interpolation.
