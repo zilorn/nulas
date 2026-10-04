@@ -1,4 +1,6 @@
 export const en = {
+ "后端未连接，配置操作暂不可用；恢复连接后自动更新状态。": "The backend is disconnected. Configuration actions are unavailable until the connection is restored and status updates automatically.",
+ "后端未连接，无法确认内核和后台任务状态；恢复连接后自动更新。": "The backend is disconnected. Core and background task status are unknown and will update automatically when the connection is restored.",
  "暂无任务": "No tasks yet",
  "暂无匹配的任务": "No matching tasks",
  "构建版本": "Build",
