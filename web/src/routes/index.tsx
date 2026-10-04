@@ -1,5 +1,6 @@
+import { usePolling } from "../lib/usePolling";
 import { useI18n } from "../lib/i18n";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, onMount, Show } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import { createApi, type Config, type Job } from "../lib/api";
 import SystemSettings from "../components/SystemSettings";
@@ -14,6 +15,19 @@ export default function Home() {
  const [jobs,setJobs] = createSignal<Job[]>([]);
  const [core,setCore] = createSignal({status:"checking",message:t("正在检查内核…")});
  const [ready,setReady] = createSignal(false);
+ const [configLoading,setConfigLoading] = createSignal(false);
+ const [configError,setConfigError] = createSignal("");
+ async function loadConfig() {
+  if (ready() || configLoading()) return;
+  setConfigLoading(true);
+  try {
+   const loaded = await api<Config>("config");
+   // A profile loaded while this request was pending takes precedence.
+   if (!ready()) { setConfig(loaded); setReady(true); }
+   setConfigError("");
+  } catch (e) { if (!ready()) setConfigError((e as Error).message); }
+  finally { setConfigLoading(false); }
+ }
  const [controller,setController] = createSignal(false);
  const [busy,setBusy] = createSignal(false);
  const [notice,setNotice] = createSignal("");
@@ -21,8 +35,24 @@ export default function Home() {
  const [online,setOnline] = createSignal(false);
  const pending = () => jobs().some(j => j.status === "queued" || j.status === "running");
  let refreshing = false;
- const refresh = async () => { if(refreshing) return; refreshing=true; try { const [list,health,status] = await Promise.all([api<Job[]>("jobs"),api<{controllerConfigured:boolean}>("health"),api<{status:string;message:string}>("core")]);setCore(status);setJobs(list);setController(health.controllerConfigured);setOnline(true); } catch { setOnline(false);setController(false); } finally { refreshing=false; } };
- onMount(() => { void (async()=>{try{setConfig(await api<Config>("config"));setReady(true);}catch(e){setError((e as Error).message);}try { setCore(await api<{status:string;message:string}>("core/ensure",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})); } catch(e) { setCore({status:"failed",message:(e as Error).message});setError((e as Error).message); } await refresh();})();const timer=setInterval(()=>void refresh(),2000);onCleanup(()=>clearInterval(timer)); });
+ const refresh = async () => {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+   await loadConfig();
+   const [list, health, status] = await Promise.allSettled([api<Job[]>("jobs"), api<{controllerConfigured:boolean}>("health"), api<{status:string;message:string}>("core")]);
+   if (list.status === "rejected") throw list.reason;
+   if (health.status === "rejected") throw health.reason;
+   if (status.status === "rejected") throw status.reason;
+   setCore(status.value); setJobs(list.value); setController(health.value.controllerConfigured); setOnline(true);
+  } catch { setOnline(false); setController(false); }
+  finally { refreshing = false; }
+ };
+ usePolling(refresh, 2000);
+ onMount(() => { void (async () => {
+  try { setCore(await api<{status:string;message:string}>("core/ensure", {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})); }
+  catch(e) { setCore({status:"failed",message:(e as Error).message});setError((e as Error).message); }
+ })(); });
  async function retryCore() { if(!online()||busy()||pending()) return; setBusy(true);setError("");try { await api("jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"install-core"})});await refresh(); } catch(e) {setError((e as Error).message);} finally {setBusy(false);} }
  const update = <K extends keyof Config>(key: K,value: Config[K]) => setConfig({...config(),[key]:value});
  async function save(action?:string) {
@@ -59,6 +89,7 @@ export default function Home() {
       </div>
       <div class="config-save"><p>{t("保存仅记录参数；生成和应用由后台执行。")}</p><div class="actions"><button type="submit" class="secondary">{t("保存配置")}</button><button type="button" class="secondary" onClick={e=>{if(e.currentTarget.form?.reportValidity())void save("generate");}}>{t("生成文件")}</button><button type="button" disabled={!controller()} onClick={e=>{if(e.currentTarget.form?.reportValidity())void save("apply");}}>{busy()?t("正在提交…"):t("保存并应用")}</button></div><Show when={online()&&!controller()}><p>{t("内核尚未连接，连接后可应用配置。")}</p></Show></div>
      </fieldset></form>
+     <Show when={!ready() && configError()}><div role="alert" class="error config-feedback"><p>{t("配置读取失败，将自动重试：{message}", { message: configError() })}</p><button type="button" class="secondary" disabled={configLoading()} onClick={() => void loadConfig()}>{t("重试读取配置")}</button></div></Show>
      <Show when={!online()}><p role="status" class="error config-feedback">{t("后端未连接，配置操作暂不可用；恢复连接后自动更新状态。")}</p></Show>
      <Show when={notice()}><p role="status" class="success config-feedback">{notice()}</p></Show><Show when={error()}><p role="alert" class="error config-feedback">{error()}</p></Show>
     </section>

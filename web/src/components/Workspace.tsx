@@ -1,5 +1,6 @@
+import { usePolling } from "../lib/usePolling";
 import { useI18n } from "../lib/i18n";
-import { createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { createEffect, createSignal, type JSX } from "solid-js";
 import AppUpdates from "./AppUpdates";
 import { createApi } from "../lib/api";
 
@@ -12,10 +13,8 @@ export default function Workspace(props: { page: "quick" | "profiles" | "tasks" 
  const api = createApi(t);
  const [online, setOnline] = createSignal(false);
  createEffect(() => { if (typeof document !== "undefined") document.title = t("Nulas · {p0}", { p0: ({quick:t("快速配置"),profiles:t("配置管理"),tasks:t("后台任务"),nodes:t("节点管理"),core:t("内核管理")})[props.page] }); });
- onMount(() => {
-  const refresh = async () => { try { setOnline((await api<{ status: string }>("health")).status === "ok"); } catch { setOnline(false); } };
-  void refresh(); const timer = setInterval(() => void refresh(), 5000); onCleanup(() => clearInterval(timer));
- });
+ const refresh = async () => { try { setOnline((await api<{ status: string }>("health")).status === "ok"); } catch { setOnline(false); } };
+ usePolling(refresh, 5000);
  return <div class="shell"><aside>
   <a class="brand" href="/"><SidebarIcon brand><path d="m12 2 10 10-10 10L2 12Z"/><path d="m12 7 5 5-5 5-5-5Z"/></SidebarIcon><span>Nulas<small>CORE CONFIGURATION</small></span></a>
   <a class="nav" classList={{active:props.page==="quick"}} href="/"><SidebarIcon><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18M9 10h12"/></SidebarIcon><span>{t("快速配置")}</span></a>

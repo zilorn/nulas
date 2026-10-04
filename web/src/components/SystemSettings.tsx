@@ -1,5 +1,6 @@
+import { usePolling } from "../lib/usePolling";
 import { useI18n } from "../lib/i18n";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { createApi, type Job } from "../lib/api";
 
 type SystemFeature = { supported: boolean; enabled: boolean; recovery?: boolean; message: string };
@@ -37,7 +38,7 @@ export default function SystemSettings() {
    setError(failure?.status === "rejected" ? String(failure.reason.message || failure.reason) : "");
   } catch (e) { setError((e as Error).message); } finally { refreshing = false; }
  };
- onMount(() => { void refresh(); const timer = setInterval(() => void refresh(), 5000); onCleanup(() => clearInterval(timer)); });
+ usePolling(refresh, 5000);
  async function toggle(enable: boolean) {
   setBusy(true); setNotice("");
   try {

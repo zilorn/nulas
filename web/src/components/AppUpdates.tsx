@@ -1,5 +1,6 @@
+import { usePolling } from "../lib/usePolling";
 import { useI18n } from "../lib/i18n";
-import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, onCleanup, Show } from "solid-js";
 import { createApi, type Job } from "../lib/api";
 
 type UpdateStatus = { supported: boolean; message: string; installed: string; latest: string; checked: number; available: boolean; restartRequired: boolean; busy: boolean; job: Job | null; error: string };
@@ -28,11 +29,15 @@ export default function AppUpdates() {
   } catch (e) { if (!disposed) setError((e as Error).message); }
   finally { if (!disposed) setSubmitting(false); }
  };
- onMount(() => {
-  void (async () => { await refresh(); if (!disposed && status()?.supported) await submit("check", true); })();
-  const timer = setInterval(() => { void refresh(); }, 5000);
-  onCleanup(() => { disposed = true; clearInterval(timer); });
- });
+ let checked = false;
+ onCleanup(() => { disposed = true; });
+ usePolling(async () => {
+  await refresh();
+  if (!disposed && !checked && status()?.supported) {
+   checked = true;
+   await submit("check", true);
+  }
+ }, 5000);
  const busy = () => submitting() || status()?.busy;
  const failed = () => status()?.job?.status === "failed";
  const message = () => {

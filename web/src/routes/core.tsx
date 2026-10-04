@@ -1,5 +1,6 @@
+import { usePolling } from "../lib/usePolling";
 import { useI18n } from "../lib/i18n";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, onMount, Show } from "solid-js";
 import Workspace from "../components/Workspace";
 import { createApi, type Job } from "../lib/api";
 type Management = { version: string; core: { status: string; message: string }; managed: boolean; busy: boolean; platform: string };
@@ -44,7 +45,8 @@ export default function Core() {
   finally { setSubmitting(false); }
  }
  const disabled = () => submitting() || !state()?.managed || state()?.busy || !!error();
- onMount(() => { void refresh(); void loadReleases(); const timer = setInterval(() => void refresh(), 2000); onCleanup(() => clearInterval(timer)); });
+ onMount(() => { void loadReleases(); });
+ usePolling(refresh, 2000);
  return <Workspace page="core">
   <section class="intro"><div><span class="eyebrow">MIHOMO CORE</span><h1>{t("内核管理")}<span>{t("，随时更新。")}</span></h1><p>{t("查看官方稳定版本历史，选择版本切换，或一键更新到最新稳定版。")}</p></div><button disabled={disabled()} onClick={() => void change("latest")}>{state()?.busy || submitting() ? t("正在处理…") : t("一键更新")}</button></section>
   <Show when={error()}><p class="error" role="alert">{error()}</p></Show>

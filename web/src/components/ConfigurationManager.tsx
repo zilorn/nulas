@@ -1,5 +1,6 @@
+import { usePolling } from "../lib/usePolling";
 import { useI18n } from "../lib/i18n";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { createApi, defaultConfig, type Config } from "../lib/api";
 
 type Profile = { id: string; name: string; config: Config; source: string; created: string; full?: boolean; refreshable?: boolean; updateIntervalHours?: number; nextUpdate?: string; updatedAt?: string; refreshStatus?: string; refreshMessage?: string };
@@ -27,12 +28,21 @@ export default function ConfigurationManager(props: { onLoad: (config: Config) =
  const [pollError, setPollError] = createSignal("");
  const [notice, setNotice] = createSignal("");
  const [search, setSearch] = createSignal("");
- const refresh = async () => { const [profiles, health, applied] = await Promise.all([api<Profile[]>("profiles"), api<{controllerConfigured: boolean}>("health"), api<AppliedConfig | null>("config/applied")]); setProfiles(current => JSON.stringify(current) === JSON.stringify(profiles) ? current : profiles); setController(health.controllerConfigured); setApplied(applied); };
- onMount(() => {
-  void refresh().catch(e => setError((e as Error).message)).finally(() => setLoading(false));
-  const timer = setInterval(() => { void refresh().then(() => setPollError("")).catch(e => { setController(false); setPollError(t("状态更新失败：{p0}", { p0: (e as Error).message })); }); }, 2000);
-  onCleanup(() => clearInterval(timer));
- });
+ const refresh = async () => {
+  // Wait for every endpoint, including slow siblings of a failed request.
+  const [profiles, health, applied] = await Promise.allSettled([api<Profile[]>("profiles"), api<{controllerConfigured: boolean}>("health"), api<AppliedConfig | null>("config/applied")]);
+  if (profiles.status === "rejected") throw profiles.reason;
+  if (health.status === "rejected") throw health.reason;
+  if (applied.status === "rejected") throw applied.reason;
+  setProfiles(current => JSON.stringify(current) === JSON.stringify(profiles.value) ? current : profiles.value);
+  setController(health.value.controllerConfigured);
+  setApplied(applied.value);
+ };
+ usePolling(async () => {
+  try { await refresh(); setPollError(""); }
+  catch (e) { setPollError(t("状态更新失败，显示上次成功读取的数据：{message}", { message: (e as Error).message })); }
+  finally { setLoading(false); }
+ }, 2000);
  const open = (kind: "create" | "import") => { setEditor(kind); setName(""); setContent(""); setURL(""); setImportKind("local"); setIntervalHours(0); setConfig(defaultConfig()); setError(""); setNotice(""); };
  const update = <K extends keyof Config>(key: K, value: Config[K]) => setConfig({ ...config(), [key]: value });
  async function readFile(file?: File) {

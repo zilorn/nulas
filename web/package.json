@@ -13,7 +13,8 @@
     "test:i18n": "node tests/i18n.test.ts",
     "test": "node --test tests/*.test.ts tests/*.test.mjs",
     "test:api": "node --test tests/api.test.ts",
-    "test:server-config": "node --test tests/server-config.test.mjs"
+    "test:server-config": "node --test tests/server-config.test.mjs",
+    "test:resilience": "node tests/resilience.test.ts"
   },
   "dependencies": {
     "@solidjs/router": "^0.16.3",
