@@ -116,11 +116,18 @@ func atomicWrite(path string, data []byte) error {
 	return os.Rename(f.Name(), path)
 }
 func (a *App) persist() error {
-	b, err := json.MarshalIndent(a.state, "", "  ")
+	next := a.state
+	next.Jobs = compactJobs(a.state.Jobs)
+	b, err := json.MarshalIndent(next, "", "  ")
 	if err != nil {
 		return err
 	}
-	return atomicWrite(filepath.Join(a.dir, "state.json"), b)
+	if err := atomicWrite(filepath.Join(a.dir, "state.json"), b); err != nil {
+		return err
+	}
+	a.state = next
+	a.cleanupJobFiles()
+	return nil
 }
 func newApp(dir, controller, secret string) (*App, error) {
 	if controller != "" {
@@ -307,10 +314,6 @@ func (a *App) handler(apiPort, devPort int) http.Handler {
 			fail(w, 409, errors.New("Set MIHOMO_CONTROLLER on the backend first"))
 			return
 		}
-		if len(a.state.Jobs) >= 1000 {
-			fail(w, 409, errors.New("job history limit reached; archive state before submitting more jobs"))
-			return
-		}
 		for _, j := range a.state.Jobs {
 			if j.Status == "queued" || j.Status == "running" {
 				fail(w, 409, errors.New("a background operation is already pending"))
@@ -416,11 +419,8 @@ func (a *App) runJob(j Job) error {
 	if e != nil {
 		return e
 	}
-	if e = atomicWrite(filepath.Join(a.dir, j.ID+".yaml"), b); e != nil {
-		return e
-	}
 	if j.Action == "generate" {
-		return nil
+		return atomicWrite(filepath.Join(a.dir, j.ID+".yaml"), b)
 	}
 	a.controlMu.Lock()
 	defer a.controlMu.Unlock()
@@ -478,13 +478,13 @@ func (a *App) process() bool {
 	if isAppUpdate(a.state.Jobs[idx].Action) {
 		a.state.Jobs[idx].Message = "正在后台执行 Nulas 更新操作"
 	}
+	j := a.state.Jobs[idx]
 	if e := a.persist(); e != nil {
 		a.state.Jobs[idx].Status = "queued"
 		a.mu.Unlock()
 		log.Printf("persist running job: %v", e)
 		return false
 	}
-	j := a.state.Jobs[idx]
 	a.mu.Unlock()
 	var imported importedConfig
 	var err error
@@ -498,6 +498,8 @@ func (a *App) process() bool {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	// Other submissions may compact completed history while this job runs.
+	idx = a.jobIndex(j.ID)
 	a.state.Jobs[idx].Status = "succeeded"
 	a.state.Jobs[idx].Message = "Configuration generated"
 	if j.Action == "install-core" {

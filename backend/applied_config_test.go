@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -79,7 +80,12 @@ func TestAppliedSnapshotUpgradeAndInterruptedJob(t *testing.T) {
 		{ID: "patch", Action: "apply", Status: "succeeded", Config: Config{7892, "global", false, true, "debug"}},
 		{ID: "interrupted", Action: "apply", Status: "running", Config: Config{7893, "direct", false, false, "info"}},
 	}
-	if err := a.persist(); err != nil {
+	// Write the legacy representation directly: current persistence compacts it.
+	data, err := json.Marshal(a.state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicWrite(filepath.Join(a.dir, "state.json"), data); err != nil {
 		t.Fatal(err)
 	}
 	b, err := newApp(a.dir, "", "")

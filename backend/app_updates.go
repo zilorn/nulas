@@ -124,10 +124,6 @@ func (a *App) registerUpdates(mux *http.ServeMux) {
 				return
 			}
 		}
-		if len(a.state.Jobs) >= 1000 {
-			fail(w, 409, errors.New("后台任务记录已满"))
-			return
-		}
 		id := make([]byte, 8)
 		if _, err := rand.Read(id); err != nil {
 			fail(w, 500, err)

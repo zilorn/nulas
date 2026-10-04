@@ -113,9 +113,6 @@ func (a *App) queueCoreWithPriority(startup bool) (int, error) {
 	if status.Status != "missing" && !(status.Status == "installed" && a.managedContext != nil) {
 		return 200, nil
 	}
-	if len(a.state.Jobs) >= 1000 {
-		return 409, errors.New("job history limit reached")
-	}
 	id := make([]byte, 16)
 	if _, err := rand.Read(id); err != nil {
 		return 500, err

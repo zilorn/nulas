@@ -137,10 +137,6 @@ func (a *App) queueCoreSwitch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if len(a.state.Jobs) >= 1000 {
-		fail(w, 409, errors.New("job history limit reached"))
-		return
-	}
 	id := make([]byte, 16)
 	if _, err := rand.Read(id); err != nil {
 		fail(w, 500, err)

@@ -181,8 +181,8 @@ func TestProfileRefreshHistoryBound(t *testing.T) {
 		a.state.Jobs[i] = Job{Action: "refresh-profile", Status: "succeeded"}
 	}
 	a.state.Jobs[0] = Job{ID: "apply-snapshot", Action: "apply", Status: "succeeded"}
-	if _, err := a.queueProfileRefresh(0, time.Now().UTC()); err != nil || len(a.state.Jobs) != 1000 || a.state.Jobs[0].ID != "apply-snapshot" {
-		t.Fatal("history unbounded or apply removed", err)
+	if _, err := a.queueProfileRefresh(0, time.Now().UTC()); err != nil || len(a.state.Jobs) != 1000 || a.state.Jobs[0].ID == "apply-snapshot" {
+		t.Fatal("history unbounded or oldest completed apply retained", err)
 	}
 }
 

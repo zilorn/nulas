@@ -121,21 +121,8 @@ func (a *App) queueProfileRefresh(index int, now time.Time) (Job, error) {
 		return Job{}, err
 	}
 	oldJobs := a.state.Jobs
-	// Bound scheduled history without deleting explicit apply/generate records.
-	jobs := append([]Job(nil), oldJobs...)
-	if len(jobs) >= 1000 {
-		for i, j := range jobs {
-			if j.Action == "refresh-profile" && (j.Status == "succeeded" || j.Status == "failed") {
-				jobs = append(jobs[:i], jobs[i+1:]...)
-				break
-			}
-		}
-	}
-	if len(jobs) >= 1000 {
-		return Job{}, errors.New("后台任务记录已满，无法提交配置更新")
-	}
 	j := Job{ID: hex.EncodeToString(id), Action: "refresh-profile", Status: "queued", Message: "等待更新配置", Created: now, ProfileID: p.ID, RefreshURL: p.RefreshURL}
-	a.state.Jobs = append(jobs, j)
+	a.state.Jobs = append(append([]Job(nil), oldJobs...), j)
 	a.state.Profiles[index].NextUpdate = nextProfileUpdate(now, p.UpdateIntervalHours)
 	a.state.Profiles[index].RefreshStatus = "queued"
 	a.state.Profiles[index].RefreshMessage = j.Message

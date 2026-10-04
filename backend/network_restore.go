@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"strings"
 	"time"
 )
@@ -67,9 +66,6 @@ func (a *App) queueNetworkRestore() error {
 	if len(jobs) == 0 {
 		a.networkRestore = nil
 		return nil
-	}
-	if len(a.state.Jobs)+len(jobs) > 1000 {
-		return errors.New("job history limit reached; cannot restore network preferences")
 	}
 	previous := len(a.state.Jobs)
 	a.state.Jobs = append(a.state.Jobs, jobs...)
