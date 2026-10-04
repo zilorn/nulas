@@ -61,10 +61,13 @@ func TestTrayLifecycleAndSavedIntent(t *testing.T) {
 	defer cancel()
 	a.trayContext, a.trayURL = ctx, "http://127.0.0.1:8080"
 	defer func() { a.trayMu.Lock(); a.stopTray(); a.trayMu.Unlock() }()
-	for _, body := range []string{`{}`, `{"enabled":"yes"}`, `{"enabled":true,"unknown":1}`} {
+	for _, body := range []string{`{}`, `{"enabled":"yes"}`, `{"enabled":true,"unknown":1}`, `{"enabled":true,"language":"fr"}`, `{"language":42}`} {
 		if w := request(a, "PUT", "/api/runtime/tray", body); w.Code != 400 {
 			t.Fatal("accepted invalid tray body")
 		}
+	}
+	if w := request(a, "PUT", "/api/runtime/tray", `{"language":"zh-CN"}`); w.Code != 200 || a.trayStatus().Enabled || a.trayStatus().Running {
+		t.Fatal("language update enabled tray", w.Body.String())
 	}
 	if w := request(a, "PUT", "/api/runtime/tray", `{"enabled":true}`); w.Code != 200 {
 		t.Fatal(w.Body.String())
@@ -84,6 +87,25 @@ func TestTrayLifecycleAndSavedIntent(t *testing.T) {
 	if !same {
 		t.Fatal("duplicate helper")
 	}
+
+	if got := process.cmd.Args; got[len(got)-2] != "--language" || got[len(got)-1] != "zh-CN" {
+		t.Fatal("missing default tray language", got)
+	}
+	if w := request(a, "PUT", "/api/runtime/tray", `{"language":"en"}`); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	<-process.done
+	a.mu.Lock()
+	process = a.tray
+	a.mu.Unlock()
+	if process == nil || process.cmd.Args[len(process.cmd.Args)-1] != "en" {
+		t.Fatal("running tray did not switch to English")
+	}
+	restored, err := newApp(a.dir, "", "")
+	if err != nil || restored.state.Preferences.TrayLanguage != "en" {
+		t.Fatal("tray language not restored", err)
+	}
+
 	// Normal disable must close stdin and wait for removal before replying.
 	if w := request(a, "PUT", "/api/runtime/tray", `{"enabled":false}`); w.Code != 200 {
 		t.Fatal(w.Body.String())
@@ -140,6 +162,9 @@ func TestTrayFailureAndPersistenceFailure(t *testing.T) {
 	}
 	if !a.state.Preferences.Tray {
 		t.Fatal("failed save changed in-memory preference")
+	}
+	if w := request(a, "PUT", "/api/runtime/tray", `{"language":"en"}`); w.Code != 500 || a.state.Preferences.TrayLanguage != "" {
+		t.Fatal("failed save changed tray language or launched helper")
 	}
 	// A failed atomic job write must roll back its associated network preference too.
 	if w := request(a, "POST", "/api/jobs", `{"action":"tun-enable"}`); w.Code != 500 {
@@ -202,11 +227,21 @@ func TestTrayInstallationProgressAndFailure(t *testing.T) {
 			if s := a.trayStatus(); s.Running || s.Message != "正在安装依赖" {
 				t.Fatal(s)
 			}
-			deadline := time.Now().Add(3 * time.Second)
+			if outcome == "READY" {
+				if w := request(a, "PUT", "/api/runtime/tray", `{"language":"en"}`); w.Code != 200 {
+					t.Fatal(w.Body.String())
+				}
+			}
+			deadline := time.Now().Add(6 * time.Second)
 			for time.Now().Before(deadline) {
 				s := a.trayStatus()
 				if outcome == "READY" && s.Running {
-					return
+					a.mu.Lock()
+					english := a.tray != nil && a.tray.cmd.Args[len(a.tray.cmd.Args)-1] == "en"
+					a.mu.Unlock()
+					if english {
+						return
+					}
 				}
 				if outcome != "READY" && !s.Running && s.Message == "安装失败" {
 					return

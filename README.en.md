@@ -263,6 +263,8 @@ Commands run from any directory, and service commands act on the current user's 
 
 ### Desktop tray (optional)
 
+The tray menu follows the web interface language (Chinese or English). Browsers share one tray, so the last synchronized language wins. The backend saves the tray language and restores it after restarting; older state files default to Chinese.
+
 The tray is off by default and provides entries for the panel, node management and background tasks, using the default browser. Enabling the tray on Linux checks dependencies and installs GTK3, PyGObject and AyatanaAppIndicator3 through apt-get, dnf or pacman when they are missing (requesting administrator authorization through pkexec, or using authorized sudo). Python tray packages are installed into a separate environment under the user cache directory `~/.cache/nulas/tray-pythonX.Y` without changing the system Python, and suitable existing dependencies are reused. Installation continues in the background while the interface shows progress or the failure reason, and you can disable the tray or retry. Dependencies are not installed without a desktop session; unsupported distributions require manual installation. `NULAS_PYTHON` should point to a Python that can load the distribution's GI bindings.
 
 On macOS/Windows, install the optional dependencies manually into the Python environment the backend uses:

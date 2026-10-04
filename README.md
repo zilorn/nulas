@@ -263,6 +263,8 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 
 ### 桌面托盘（可选）
 
+托盘菜单跟随网页的中英文语言选择；多个浏览器共用一个托盘，最后同步的语言生效。后端保存托盘语言并在重启时恢复；旧状态默认使用中文。
+
 托盘默认关闭，提供打开面板、节点管理与后台任务入口，使用默认浏览器。Linux 开启托盘时会检查依赖，缺失时自动通过 apt-get、dnf 或 pacman 安装 GTK3、PyGObject 与 AyatanaAppIndicator3（通过 pkexec 请求管理员授权，或使用已授权的 sudo）。Python 托盘包安装在用户缓存目录 `~/.cache/nulas/tray-pythonX.Y` 的独立环境中，不改动系统 Python；已有可用依赖时直接复用。安装在后台继续，界面显示进度或失败原因，可关闭托盘或重试。无桌面会话时不会安装依赖；不支持的发行版需手动安装。`NULAS_PYTHON` 应指向能加载发行版 GI 绑定的 Python。
 
 macOS/Windows 仍需在后端使用的 Python 环境手动安装可选依赖：

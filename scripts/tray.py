@@ -17,10 +17,18 @@ def dashboard_url(value):
     return value.rstrip("/")
 
 
+MENU_LABELS = {
+    "zh-CN": ("打开 Nulas", "节点管理", "后台任务"),
+    "en": ("Open Nulas", "Nodes", "Background tasks"),
+}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True, type=dashboard_url)
+    parser.add_argument("--language", choices=MENU_LABELS, default="zh-CN")
     args = parser.parse_args()
+    labels = MENU_LABELS[args.language]
     if sys.platform == "linux":
         from tray_dependencies import prepare_linux
         prepare_linux()
@@ -41,9 +49,9 @@ def main():
         return activate
 
     icon = pystray.Icon("nulas", image, "Nulas", pystray.Menu(
-        pystray.MenuItem("打开 Nulas", open_page("/"), default=True),
-        pystray.MenuItem("节点管理", open_page("/nodes")),
-        pystray.MenuItem("后台任务", open_page("/tasks")),
+        pystray.MenuItem(labels[0], open_page("/"), default=True),
+        pystray.MenuItem(labels[1], open_page("/nodes")),
+        pystray.MenuItem(labels[2], open_page("/tasks")),
     ))
 
     def setup(active):

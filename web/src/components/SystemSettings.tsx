@@ -63,7 +63,7 @@ export default function SystemSettings() {
  async function toggleTray(enable: boolean) {
   setBusy(true); setError(""); setNotice("");
   try {
-   const result = await api<TrayStatus>("runtime/tray", { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify({enabled:enable}) });
+   const result = await api<TrayStatus>("runtime/tray", { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify({enabled:enable, language:locale()}) });
    setTray(result); setTrayDetails(true);
    setNotice(result.enabled && !result.running ? result.message : t("托盘偏好已保存。"));
   } catch(e) { setError((e as Error).message); } finally { setBusy(false); }

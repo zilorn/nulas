@@ -50,6 +50,10 @@ func (a *App) startTray() {
 		return
 	}
 	ctx, origin := a.trayContext, a.trayURL
+	language := a.state.Preferences.TrayLanguage
+	if language != "en" {
+		language = "zh-CN"
+	}
 	a.trayError = ""
 	a.mu.Unlock()
 	failure := func(message string) { a.mu.Lock(); a.trayError = message; a.mu.Unlock() }
@@ -71,7 +75,7 @@ func (a *App) startTray() {
 		failure("无法确定托盘程序路径。")
 		return
 	}
-	cmd := exec.CommandContext(ctx, env("NULAS_PYTHON", python), script, "--url", origin)
+	cmd := exec.CommandContext(ctx, env("NULAS_PYTHON", python), script, "--url", origin, "--language", language)
 	// The helper only needs desktop/session variables, never controller credentials.
 	for _, value := range os.Environ() {
 		if !strings.HasPrefix(value, "MIHOMO_") && !strings.HasPrefix(value, "NULAS_") {
@@ -126,6 +130,24 @@ func (a *App) startTray() {
 			}
 		}
 		ready <- ok
+		if ok {
+			// A language selection can arrive while dependencies are being prepared.
+			go func() {
+				a.trayMu.Lock()
+				defer a.trayMu.Unlock()
+				a.mu.Lock()
+				selected := a.state.Preferences.TrayLanguage
+				if selected != "en" {
+					selected = "zh-CN"
+				}
+				refresh := a.tray == process && a.state.Preferences.Tray && selected != language
+				a.mu.Unlock()
+				if refresh {
+					a.stopTray()
+					a.startTray()
+				}
+			}()
+		}
 		io.Copy(io.Discard, output)
 	}()
 	go func() {
@@ -210,36 +232,58 @@ func (a *App) trayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/runtime/tray", func(w http.ResponseWriter, r *http.Request) { reply(w, 200, a.trayStatus()) })
 	mux.HandleFunc("PUT /api/runtime/tray", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Enabled *bool `json:"enabled"`
+			Enabled  *bool   `json:"enabled"`
+			Language *string `json:"language"`
 		}
 		if err := decode(w, r, &body); err != nil {
 			fail(w, 400, err)
 			return
 		}
-		if body.Enabled == nil {
-			fail(w, 400, errors.New("需要 enabled 布尔值"))
+		if body.Enabled == nil && body.Language == nil {
+			fail(w, 400, errors.New("需要 enabled 布尔值或 language"))
 			return
 		}
-		if *body.Enabled && !a.trayStatus().Supported {
+		if body.Language != nil && *body.Language != "zh-CN" && *body.Language != "en" {
+			fail(w, 400, errors.New("language 仅支持 zh-CN 或 en"))
+			return
+		}
+		if body.Enabled != nil && *body.Enabled && !a.trayStatus().Supported {
 			fail(w, 409, errors.New("此平台不支持桌面托盘"))
 			return
 		}
 		a.trayMu.Lock()
 		defer a.trayMu.Unlock()
 		a.mu.Lock()
-		old := a.state.Preferences.Tray
-		a.state.Preferences.Tray = *body.Enabled
-		err := a.persist()
+		old := a.state.Preferences
+		if body.Enabled != nil {
+			a.state.Preferences.Tray = *body.Enabled
+		}
+		if body.Language != nil {
+			a.state.Preferences.TrayLanguage = *body.Language
+		}
+		languageChanged := old.TrayLanguage != a.state.Preferences.TrayLanguage
+		running := a.tray != nil && a.tray.ready
+		enabled := a.state.Preferences.Tray
+		var err error
+		if old != a.state.Preferences || body.Enabled != nil {
+			err = a.persist()
+		}
 		if err != nil {
-			a.state.Preferences.Tray = old
+			a.state.Preferences = old
 		}
 		a.mu.Unlock()
 		if err != nil {
 			fail(w, 500, fmt.Errorf("保存托盘偏好失败：%w", err))
 			return
 		}
-		if *body.Enabled {
-			a.startTray()
+		// Language-only requests never enable a tray or retry a failed launch.
+		if enabled {
+			if languageChanged && running {
+				a.stopTray()
+			}
+			if body.Enabled != nil || (languageChanged && running) {
+				a.startTray()
+			}
 		} else {
 			a.stopTray()
 			a.mu.Lock()

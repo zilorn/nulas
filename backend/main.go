@@ -45,10 +45,11 @@ type Job struct {
 	RefreshURL  string    `json:"refreshURL,omitempty"`
 }
 type Preferences struct {
-	Tray    bool  `json:"tray"`
-	Proxy   *bool `json:"proxy,omitempty"`
-	TUN     *bool `json:"tun,omitempty"`
-	Startup *bool `json:"startup,omitempty"`
+	Tray         bool   `json:"tray"`
+	TrayLanguage string `json:"trayLanguage,omitempty"`
+	Proxy        *bool  `json:"proxy,omitempty"`
+	TUN          *bool  `json:"tun,omitempty"`
+	Startup      *bool  `json:"startup,omitempty"`
 }
 type State struct {
 	Preferences Preferences       `json:"preferences"`

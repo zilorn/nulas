@@ -18,6 +18,10 @@ class TrayURLTests(unittest.TestCase):
 
 class NativeHelperContractTests(unittest.TestCase):
     def test_main_thread_ready_menu_and_parent_eof(self):
+        self.check_helper([], ["打开 Nulas", "节点管理", "后台任务"])
+        self.check_helper(["--language", "en"], ["Open Nulas", "Nodes", "Background tasks"])
+
+    def check_helper(self, arguments, labels):
         import io
         import threading
         import types
@@ -47,19 +51,20 @@ class NativeHelperContractTests(unittest.TestCase):
                     raise AssertionError("parent EOF did not stop tray")
 
         native = types.SimpleNamespace(Icon=Icon, Menu=lambda *items: items,
-            MenuItem=lambda title, action, **kwargs: types.SimpleNamespace(action=action))
+            MenuItem=lambda title, action, **kwargs: types.SimpleNamespace(title=title, action=action))
         pillow = types.SimpleNamespace(Image=types.SimpleNamespace(new=Mock()),
             ImageDraw=types.SimpleNamespace(Draw=Mock()))
         output = io.StringIO()
         stdin = types.SimpleNamespace(buffer=io.BytesIO())
         with patch.dict("sys.modules", {"pystray": native, "PIL": pillow}), \
                 patch("tray_dependencies.prepare_linux"), \
-                patch.object(tray.sys, "argv", ["tray.py", "--url", "http://127.0.0.1:8080"]), \
+                patch.object(tray.sys, "argv", ["tray.py", "--url", "http://127.0.0.1:8080"] + arguments), \
                 patch.object(tray.sys, "stdin", stdin), patch.object(tray.sys, "stdout", output), \
                 patch.object(tray.webbrowser, "open") as open_browser:
             tray.main()
             for item in instances[0].menu:
                 item.action(instances[0], item)
+        self.assertEqual([item.title for item in instances[0].menu], labels)
         self.assertTrue(instances[0].visible)
         self.assertEqual(output.getvalue(), "READY\n")
         self.assertEqual([call.args[0] for call in open_browser.call_args_list],
