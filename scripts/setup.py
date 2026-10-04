@@ -278,7 +278,7 @@ def stage(home, metadata, commit):
     return updated
 
 
-def update(home, check=False):
+def update(home, check=False, accept_history_rewrite=None):
     with locked(home):
         metadata = load(home)
         activate_tools(metadata)
@@ -287,8 +287,26 @@ def update(home, check=False):
         latest = command('git', 'rev-parse', 'FETCH_HEAD', cwd=source, capture=True)
         current = metadata['commit']
         print(f'Installed: {current}\nLatest:    {latest}', flush=True)
-        # Reject history rewrites before persisting discovery for the sidebar.
-        command('git', 'merge-base', '--is-ancestor', current, latest, cwd=source)
+        # Approval is tied to one fetched commit, never saved for automatic updates.
+        if accept_history_rewrite is not None:
+            if check:
+                raise RuntimeError('History rewrite recovery requires a manual installation, without --check')
+            if accept_history_rewrite != latest:
+                raise RuntimeError('Recovery commit does not match the latest remote commit; '
+                                   'verify the remote history and retry with ' + latest)
+        try:
+            command('git', 'merge-base', '--is-ancestor', current, latest, cwd=source)
+        except subprocess.CalledProcessError as error:
+            if error.returncode != 1:
+                raise  # Missing objects and Git failures are not history rewrites.
+            if accept_history_rewrite is None:
+                raise RuntimeError(
+                    'Remote branch history was rewritten or rolled back. Current version is preserved. '
+                    'After verifying the repository, branch and latest commit, recover with '
+                    'nulas update --accept-history-rewrite ' + latest +
+                    ' (use the latest trusted scripts/setup.py if the installed version lacks this option).'
+                ) from error
+            print('Accepting remote history rewrite for this update only.', flush=True)
         metadata['latest'] = latest
         metadata['checked'] = time.time()
         atomic_json(home / 'installation.json', metadata)
@@ -671,12 +689,16 @@ def main():
     parser.add_argument('--repository', default=REPOSITORY)
     parser.add_argument('--branch', default='main')
     parser.add_argument('--check', action='store_true')
+    parser.add_argument('--accept-history-rewrite', metavar='COMMIT',
+                        help='Manually accept rewritten history only for this exact latest full commit ID')
     parser.add_argument('--auto', choices=['on', 'off', 'status'])
     parser.add_argument('--watch', action='store_true', help='Run automatic update scheduler in foreground')
     args = parser.parse_args()
     home = args.home.expanduser().resolve()
-    if args.action != 'update' and (args.check or args.auto or args.watch):
+    if args.action != 'update' and (args.check or args.auto or args.watch or args.accept_history_rewrite is not None):
         parser.error('update options require the update command')
+    if args.accept_history_rewrite is not None and (args.check or args.auto or args.watch):
+        parser.error('--accept-history-rewrite requires a manual update without --check, --auto or --watch')
     if args.action == 'install':
         install(home, args.repository, args.branch)
     elif args.action == 'remove':
@@ -697,7 +719,7 @@ def main():
             signal.signal(signum, lambda *_: stop.set())
         watch(home, stop)
     else:
-        update(home, args.check)
+        update(home, args.check, args.accept_history_rewrite)
 
 
 if __name__ == '__main__':

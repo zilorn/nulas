@@ -33,7 +33,7 @@ const cliUsage = `Usage: nulas [open|install|uninstall|remove|status|start|stop|
            Start Nulas first; requires a desktop browser session.
   run      Run both servers in foreground (quick installation required).
   update   Check/build/install updates (quick installation required).
-           --check, --auto on|off|status, --watch
+           --check, --auto on|off|status, --watch, --accept-history-rewrite COMMIT
   install  Install the Linux user service for both frontend and backend
            (does not start it or enable boot startup; requires Python 3).
   uninstall Stop, disable and remove the Linux user service (requires Python 3).

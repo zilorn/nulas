@@ -259,13 +259,63 @@ class SetupTests(unittest.TestCase):
             self.assertTrue(release.exists())
             self.assertTrue(protected.exists())
             self.assertEqual((home / 'data/state.json').read_text(), 'keep')
-            # A force-pushed/divergent history must never become active.
+            # A force-pushed history requires approval for the exact fetched commit.
             git('checkout', '--orphan', 'rewrite')
             git('commit', '-am', 'rewritten')
             git('branch', '-f', 'main', 'HEAD')
-            with self.assertRaises(subprocess.CalledProcessError):
-                setup.update(home)
+            rewritten = git('rev-parse', 'HEAD')
+            before = setup.load(home)
+            with patch.object(setup, 'build') as build:
+                with self.assertRaisesRegex(RuntimeError, '--accept-history-rewrite ' + rewritten):
+                    setup.update(home)
+                with self.assertRaisesRegex(RuntimeError, '--accept-history-rewrite'):
+                    setup.update(home, check=True)
+                with self.assertRaisesRegex(RuntimeError, 'does not match'):
+                    setup.update(home, accept_history_rewrite=second)
+                build.assert_not_called()
+            self.assertEqual(setup.load(home), before)
+            with patch.object(setup, 'build', side_effect=RuntimeError('build failed')):
+                with self.assertRaisesRegex(RuntimeError, 'build failed'):
+                    setup.update(home, accept_history_rewrite=rewritten)
             self.assertEqual(setup.load(home)['commit'], second)
+            self.assertEqual(setup.load(home)['current'], str(release))
+            with patch.object(setup, 'build'):
+                setup.update(home, accept_history_rewrite=rewritten)
+            self.assertEqual(setup.load(home)['commit'], rewritten)
+            self.assertTrue(release.exists())
+            self.assertEqual((home / 'data/state.json').read_text(), 'keep')
+            (remote / 'file').write_text('after rewrite')
+            git('commit', '-am', 'after rewrite')
+            git('branch', '-f', 'main', 'HEAD')
+            with patch.object(setup, 'build'):
+                setup.update(home)
+            self.assertEqual(setup.load(home)['commit'], git('rev-parse', 'HEAD'))
+
+    def test_recovery_option_is_manual_only(self):
+        for args in (['run'], ['install'], ['remove'], ['update', '--check'],
+                     ['update', '--auto', 'on'], ['update', '--watch']):
+            with self.subTest(args=args), patch.object(sys, 'argv',
+                    ['setup.py', *args, '--accept-history-rewrite', 'a' * 40]):
+                with self.assertRaises(SystemExit) as error:
+                    setup.main()
+                self.assertEqual(error.exception.code, 2)
+
+    def test_git_errors_are_not_bypassed_by_recovery(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            metadata = {'commit': 'a' * 40, 'branch': 'main', 'tools': {}}
+            setup.atomic_json(home / 'installation.json', metadata)
+            def git(*args, **kwargs):
+                if 'rev-parse' in args:
+                    return 'b' * 40
+                if 'merge-base' in args:
+                    raise subprocess.CalledProcessError(128, args)
+            with patch.object(setup, 'activate_tools'), patch.object(setup, 'command', side_effect=git), \
+                    patch.object(setup, 'stage') as stage:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    setup.update(home, accept_history_rewrite='b' * 40)
+                stage.assert_not_called()
+            self.assertEqual(setup.load(home), metadata)
 
     def test_cleanup_guards_and_retries_failed_deletion(self):
         with tempfile.TemporaryDirectory() as temporary:
