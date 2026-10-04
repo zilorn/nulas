@@ -20,7 +20,9 @@ StateDirectory=nulas
 StateDirectoryMode=0700
 Restart=on-failure
 RestartSec=3
-NoNewPrivileges=true
+# Managed Mihomo needs file capabilities granted by setcap for TUN on exec.
+# Keep Nulas unprivileged; do not grant ambient capabilities to the backend.
+NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true

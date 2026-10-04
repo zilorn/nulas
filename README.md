@@ -204,6 +204,8 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 
 后端模板显式设置 `NULAS_CORE_DIR=/var/lib/nulas/core`、`NULAS_CORE_INSTALLER=/opt/nulas/scripts/install_core.py` 与 `NULAS_TRAY_SCRIPT=/opt/nulas/scripts/tray.py`，不依赖开发环境的相对路径。systemd 的 `StateDirectory=nulas` 创建由服务用户拥有的 `/var/lib/nulas`，状态、托管内核及其版本下载均保存在该可写目录内；`ProtectSystem=strict` 保持安装目录只读。未设置 `MIHOMO_CONTROLLER` 时，服务使用托管内核，首次启动需要联网下载官方内核。`/etc/nulas.env` 可覆盖模板的环境变量；覆盖内核目录时须确保它在服务沙箱中可写。系统级服务没有用户桌面会话，不能显示托盘或控制 GNOME 系统代理；需要这些功能时使用桌面会话中的用户级服务。
 
+后端模板使用 `NoNewPrivileges=false`，使托管 Mihomo 在启动时能够获得通过 `setcap` 授予的文件能力；Nulas 仍以普通 `nulas` 用户运行，不给后端授予 ambient capabilities。SSR 模板仍使用 `NoNewPrivileges=true`。不需要 TUN 时，可通过后端服务的 drop-in 设置 `NoNewPrivileges=true` 加固，但这会阻止上述文件能力授权流程。需要 TUN 时，先对网页提示的实际托管内核路径执行 `setcap`，再重启 `nulas.service`，让新内核进程获得能力；替换或升级内核二进制后需重新授权并重启。已有部署更新服务模板或 drop-in 后，执行 `sudo systemctl daemon-reload` 和 `sudo systemctl restart nulas.service`，再在网页检查 TUN 就绪状态。
+
 生产环境以 Go 作为统一入口：`/api/*` 由 Go 处理，页面、客户端资源与框架请求转发到本机 Node SSR 服务，无需 Nginx；SSR 不可用时页面返回明确的 502，API 仍然可用。Go 任务 worker 与 Node 独立运行，SSR 停止不会取消后台任务。
 
 ## 使用
