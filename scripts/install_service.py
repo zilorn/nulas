@@ -15,6 +15,19 @@ def unit_quote(value):
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
 
 
+def exec_argument(value):
+    # $$ is supported by older systemd versions, unlike the ':' prefix.
+    # Only arguments expand environment variables; executable paths do not.
+    return unit_quote(value).replace("$", "$$")
+
+
+def managed_launcher_line(line, installation):
+    launcher = str(installation / "bin/launcher.py")
+    if line.startswith("ExecStart=:"):
+        return line.endswith(" " + unit_quote(launcher) + " run")
+    return line.startswith("ExecStart=") and line.endswith(" " + exec_argument(launcher) + " run")
+
+
 def working_directory(value):
     # Unlike ExecStart/Environment, systemd reads this as a literal path;
     # quotes and backslash escapes are not removed. Only specifiers expand.
@@ -25,11 +38,11 @@ def working_directory(value):
 
 
 def service_text(root, node, installation=None):
-    start = ":/bin/bash " + unit_quote(str(root / "scripts/start.sh"))
+    start = "/bin/bash " + exec_argument(str(root / "scripts/start.sh"))
     if installation:
         import json
         metadata = json.loads((installation / "installation.json").read_text(encoding="utf-8"))
-        start = ":" + unit_quote(metadata["tools"]["python"]) + " " + unit_quote(str(installation / "bin/launcher.py")) + " run"
+        start = unit_quote(metadata["tools"]["python"]) + " " + exec_argument(str(installation / "bin/launcher.py")) + " run"
     return (MARKER + "[Unit]\nDescription=Nulas frontend and backend\n\n[Service]\n"
             + "Type=simple\nWorkingDirectory=" + working_directory(str(installation or root)) + "\n"
             + "Environment=" + unit_quote("PATH=" + str(Path(node).parent) + ":/usr/local/bin:/usr/bin:/bin") + "\n"
@@ -54,8 +67,7 @@ def uninstall_service(installation=None):
     if not content.startswith(MARKER):
         raise RuntimeError("Refusing to remove an existing service not created by Nulas.")
     if installation:
-        launcher = " " + unit_quote(str(installation / "bin/launcher.py")) + " run"
-        if not any(line.startswith("ExecStart=:") and line.endswith(launcher) for line in content.splitlines()):
+        if not any(managed_launcher_line(line, installation) for line in content.splitlines()):
             raise RuntimeError("The Nulas user service belongs to a different installation; run nulas uninstall explicitly first.")
     fragment = subprocess.check_output(
         ["systemctl", "--user", "show", "nulas.service", "--property=FragmentPath", "--value"],

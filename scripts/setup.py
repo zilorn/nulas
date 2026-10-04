@@ -361,7 +361,7 @@ def migrate_service_directory(home):
     # before removing releases, otherwise the next systemd restart cannot start.
     if sys.platform != 'linux':
         return
-    from install_service import MARKER, unit_quote, working_directory
+    from install_service import MARKER, managed_launcher_line, working_directory
     config = Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config')))
     unit = config / 'systemd/user/nulas.service'
     if not unit.exists():
@@ -369,9 +369,8 @@ def migrate_service_directory(home):
     if unit.is_symlink():
         raise RuntimeError('Refusing to migrate a symlinked service')
     content = unit.read_text()
-    launcher = ' ' + unit_quote(str(home / 'bin/launcher.py')) + ' run'
     if not content.startswith(MARKER) or not any(
-            line.startswith('ExecStart=:') and line.endswith(launcher) for line in content.splitlines()):
+            managed_launcher_line(line, home) for line in content.splitlines()):
         raise RuntimeError('Service ownership cannot be verified; keeping old releases')
     lines = content.splitlines(keepends=True)
     replacement = 'WorkingDirectory=' + working_directory(str(home)) + '\n'
