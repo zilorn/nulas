@@ -91,3 +91,12 @@ func TestSavedSSRPortRoutesPages(t *testing.T) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestHealthIdentifiesRestartedInstance(t *testing.T) {
+	t.Setenv("NULAS_RUN_INSTANCE", "new-start-instance")
+	w := httptest.NewRecorder()
+	testApp(t, "").handler(4669, 4589).ServeHTTP(w, httptest.NewRequest("GET", "http://localhost:4669/api/health", nil))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"instance":"new-start-instance"`) {
+		t.Fatalf("startup identity unavailable: %d %s", w.Code, w.Body.String())
+	}
+}

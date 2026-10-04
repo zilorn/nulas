@@ -3,10 +3,12 @@
 import argparse
 import contextlib
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
 import platform
+import secrets
 import re
 import shlex
 import shutil
@@ -17,6 +19,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -24,9 +27,9 @@ REPOSITORY = 'https://github.com/zilorn/nulas.git'
 TIMEOUT = 1800
 
 
-def command(*args, cwd=None, capture=False):
+def command(*args, cwd=None, capture=False, timeout=TIMEOUT):
     result = subprocess.run([str(a) for a in args], cwd=cwd, check=True,
-                            timeout=TIMEOUT, text=True,
+                            timeout=timeout, text=True,
                             stdout=subprocess.PIPE if capture else None)
     return result.stdout.strip() if capture else ''
 
@@ -301,6 +304,95 @@ def watch(home, stop):
         stop.wait(6 * 3600)
 
 
+def servers_ready(address, instance, processes):
+    # Probe only loopback, without ambient HTTP proxies or redirects.
+    host, port = address.rsplit(':', 1)
+    host = host.strip('[]')
+    if host in ('', '0.0.0.0', '::'):
+        host = '127.0.0.1' if host != '::' else '::1'
+    if host != 'localhost' and not ipaddress.ip_address(host).is_loopback:
+        return False
+    origin = 'http://' + (f'[{host}]' if ':' in host else host) + ':' + str(int(port))
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    with opener.open(origin + '/api/health', timeout=2) as response:
+        health = json.loads(response.read(4096))
+        if health.get('status') != 'ok' or health.get('instance') != instance:
+            return False
+    with opener.open(origin + '/', timeout=2) as response:
+        if response.status != 200 or 'text/html' not in response.headers.get('Content-Type', ''):
+            return False
+    return all(process.poll() is None for process in processes)
+
+
+def migrate_service_directory(home):
+    # Earlier managed units used a release as WorkingDirectory. Move that reference
+    # before removing releases, otherwise the next systemd restart cannot start.
+    if sys.platform != 'linux':
+        return
+    from install_service import MARKER, unit_quote, working_directory
+    config = Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config')))
+    unit = config / 'systemd/user/nulas.service'
+    if not unit.exists():
+        return
+    if unit.is_symlink():
+        raise RuntimeError('Refusing to migrate a symlinked service')
+    content = unit.read_text()
+    launcher = ' ' + unit_quote(str(home / 'bin/launcher.py')) + ' run'
+    if not content.startswith(MARKER) or not any(
+            line.startswith('ExecStart=:') and line.endswith(launcher) for line in content.splitlines()):
+        raise RuntimeError('Service ownership cannot be verified; keeping old releases')
+    lines = content.splitlines(keepends=True)
+    replacement = 'WorkingDirectory=' + working_directory(str(home)) + '\n'
+    updated = ''.join(replacement if line.startswith('WorkingDirectory=') else line for line in lines)
+    if updated != content:
+        launcher_file(unit, updated.encode('utf-8'))
+    # Also retry reload when a previous attempt wrote the unit but reload failed.
+    command('systemctl', '--user', 'daemon-reload', timeout=10)
+
+
+def cleanup_releases(home, source, instance, address, processes):
+    with locked(home):
+        metadata = load(home)
+        releases = home / 'releases'
+        if releases.is_symlink() or source.is_symlink() or source.parent != releases:
+            return
+        commit = metadata.get('commit')
+        if (Path(metadata['current']) != source or not commit or metadata.get('latest') != commit
+                or Path(__file__).resolve().parent.parent != source.resolve()):
+            return
+        if command('git', 'rev-parse', 'HEAD', cwd=source, capture=True) != commit:
+            return
+        if not servers_ready(address, instance, processes):
+            return
+        command('git', 'fetch', '--no-tags', 'origin', metadata['branch'], cwd=home / 'source', timeout=15)
+        latest = command('git', 'rev-parse', 'FETCH_HEAD', cwd=home / 'source', capture=True)
+        metadata.update(latest=latest, checked=time.time())
+        atomic_json(home / 'installation.json', metadata)
+        if latest != commit or not servers_ready(address, instance, processes):
+            return
+        migrate_service_directory(home)
+        for release in releases.iterdir():
+            # Only installer-generated, self-contained Git checkouts of ancestor
+            # commits qualify. Unknown directories, links and divergent builds stay.
+            if (release == source or release.is_symlink() or not release.is_dir()
+                    or release.resolve().parent != releases.resolve()
+                    or not re.fullmatch(r'[0-9a-f]{12}-[0-9]+', release.name)
+                    or not (release / '.git').is_dir() or (release / '.git').is_symlink()):
+                continue
+            try:
+                old = command('git', 'rev-parse', 'HEAD', cwd=release, capture=True)
+                if not old.startswith(release.name[:12]):
+                    continue
+                command('git', 'merge-base', '--is-ancestor', old, commit, cwd=source)
+                shutil.rmtree(release)
+                print('Removed obsolete release: ' + release.name, flush=True)
+            except (OSError, subprocess.SubprocessError) as error:
+                print(f'Release cleanup skipped {release.name}: {error}', file=sys.stderr, flush=True)
+
+
 def run_servers(home):
     metadata = load(home)
     activate_tools(metadata)
@@ -319,6 +411,8 @@ def run_servers(home):
     environment.setdefault('NULAS_CORE_INSTALLER', str(source / 'scripts/install_core.py'))
     environment.setdefault('NULAS_TRAY_SCRIPT', str(source / 'scripts/tray.py'))
     environment.setdefault('NULAS_PYTHON', metadata['tools']['python'])
+    instance = secrets.token_hex(32)
+    environment['NULAS_RUN_INSTANCE'] = instance
     processes = []
     stop = threading.Event()
     def interrupt(_signum, _frame):
@@ -329,12 +423,33 @@ def run_servers(home):
         processes.append(subprocess.Popen([str(source / 'bin' / binary_name())], cwd=source / 'backend', env=environment))
         processes.append(subprocess.Popen([metadata['tools']['node'], str(source / 'web/scripts/start.mjs')],
                                           cwd=source / 'web', env=environment))
-        threading.Thread(target=watch, args=(home, stop), daemon=True).start()
         print('Nulas: http://' + web_address, flush=True)
+        startup_deadline = time.monotonic() + 60
+        startup_checked = False
+        ready_checks = 0
         while not stop.wait(0.5):
             for process in processes:
                 if process.poll() is not None:
                     raise RuntimeError(f'A server exited with status {process.returncode}')
+            if not startup_checked:
+                try:
+                    if servers_ready(web_address, instance, processes):
+                        ready_checks += 1
+                        if ready_checks >= 2:
+                            cleanup_releases(home, source, instance, web_address, processes)
+                            startup_checked = True
+                    else:
+                        ready_checks = 0
+                except (OSError, urllib.error.URLError):
+                    ready_checks = 0
+                except Exception as error:
+                    print(f'Post-start release cleanup skipped: {error}', file=sys.stderr, flush=True)
+                    startup_checked = True
+                if time.monotonic() >= startup_deadline:
+                    print('Startup verification timed out; keeping old releases.', file=sys.stderr, flush=True)
+                    startup_checked = True
+                if startup_checked:
+                    threading.Thread(target=watch, args=(home, stop), daemon=True).start()
     finally:
         stop.set()
         for process in processes:

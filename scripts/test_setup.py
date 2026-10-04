@@ -162,6 +162,28 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(setup.load(home)['commit'], second)
             self.assertEqual((Path(setup.load(home)['current']) / 'file').read_text(), 'second')
             self.assertEqual((remote / 'file').read_text(), 'second')
+            # Updating never removes even the failed checkout. Cleanup requires
+            # the restarted current script, ready servers and a fresh latest check.
+            release = Path(setup.load(home)['current'])
+            old = next(item for item in (home / 'releases').iterdir() if item != release)
+            protected = home / 'releases/custom-directory'
+            protected.mkdir()
+            (home / 'data').mkdir()
+            (home / 'data/state.json').write_text('keep')
+            self.assertTrue(old.exists())
+            with patch.object(setup, 'servers_ready', return_value=True), \
+                    patch.object(setup, 'migrate_service_directory'):
+                setup.cleanup_releases(home, release, 'instance', '127.0.0.1:4669', [])
+                self.assertTrue(old.exists())  # old/unrelated script cannot clean
+                with patch.object(setup, '__file__', str(release / 'scripts/setup.py')):
+                    with patch.object(setup, 'servers_ready', return_value=False):
+                        setup.cleanup_releases(home, release, 'instance', '127.0.0.1:4669', [])
+                    self.assertTrue(old.exists())
+                    setup.cleanup_releases(home, release, 'instance', '127.0.0.1:4669', [])
+            self.assertFalse(old.exists())
+            self.assertTrue(release.exists())
+            self.assertTrue(protected.exists())
+            self.assertEqual((home / 'data/state.json').read_text(), 'keep')
             # A force-pushed/divergent history must never become active.
             git('checkout', '--orphan', 'rewrite')
             git('commit', '-am', 'rewritten')
@@ -169,6 +191,99 @@ class SetupTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 setup.update(home)
             self.assertEqual(setup.load(home)['commit'], second)
+
+    def test_cleanup_guards_and_retries_failed_deletion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            current = home / 'releases' / ('a' * 12 + '-2')
+            old = home / 'releases' / ('b' * 12 + '-1')
+            for release in (old, current):
+                (release / '.git').mkdir(parents=True)
+            outside = home / 'outside'
+            outside.mkdir()
+            (home / 'releases' / ('c' * 12 + '-3')).symlink_to(outside, target_is_directory=True)
+            metadata = {'current': str(current), 'commit': 'a' * 40, 'latest': 'a' * 40, 'branch': 'main'}
+            setup.atomic_json(home / 'installation.json', metadata)
+            latest = 'a' * 40
+            def git(*args, **kwargs):
+                if args[1:3] == ('rev-parse', 'FETCH_HEAD'):
+                    return latest
+                if args[1:3] == ('rev-parse', 'HEAD'):
+                    return ('b' if kwargs['cwd'] == old else 'a') * 40
+                return ''
+            with patch.object(setup, '__file__', str(current / 'scripts/setup.py')), \
+                    patch.object(setup, 'servers_ready', return_value=True), \
+                    patch.object(setup, 'command', side_effect=git), \
+                    patch.object(setup, 'migrate_service_directory') as migrate:
+                latest = 'd' * 40
+                setup.cleanup_releases(home, current, 'id', '127.0.0.1:4669', [])
+                self.assertTrue(old.exists())
+                migrate.assert_not_called()
+                latest = 'a' * 40
+                setup.atomic_json(home / 'installation.json', metadata)
+                with patch.object(setup, 'migrate_service_directory', side_effect=RuntimeError('reload failed')):
+                    with self.assertRaisesRegex(RuntimeError, 'reload failed'):
+                        setup.cleanup_releases(home, current, 'id', '127.0.0.1:4669', [])
+                self.assertTrue(old.exists())
+                with patch.object(setup.shutil, 'rmtree', side_effect=OSError('in use')):
+                    setup.cleanup_releases(home, current, 'id', '127.0.0.1:4669', [])
+                self.assertTrue(old.exists())
+                setup.cleanup_releases(home, current, 'id', '127.0.0.1:4669', [])
+                self.assertFalse(old.exists())
+                self.assertTrue(current.exists())
+                self.assertTrue(outside.exists())
+
+    def test_readiness_rejects_other_instance_and_dead_server(self):
+        from unittest.mock import MagicMock
+        opener = MagicMock()
+        response = opener.open.return_value.__enter__.return_value
+        response.read.return_value = b'{"status":"ok","instance":"old"}'
+        with patch.object(setup.urllib.request, 'build_opener', return_value=opener):
+            self.assertFalse(setup.servers_ready('127.0.0.1:4669', 'new', []))
+            self.assertEqual(opener.open.call_count, 1)
+            response.read.return_value = b'{"status":"ok","instance":"new"}'
+            response.status = 200
+            response.headers = {'Content-Type': 'text/html'}
+            process = MagicMock()
+            process.poll.return_value = 1
+            self.assertFalse(setup.servers_ready('127.0.0.1:4669', 'new', [process]))
+            process.poll.return_value = None
+            self.assertTrue(setup.servers_ready('[::1]:4669', 'new', [process]))
+            self.assertFalse(setup.servers_ready('192.0.2.1:4669', 'new', [process]))
+
+    def test_startup_cleans_only_after_ready_and_before_update_watcher(self):
+        from unittest.mock import MagicMock
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            source = home / 'releases/current'
+            setup.atomic_json(home / 'installation.json', {'current': str(source),
+                'tools': {key: '/tools/' + key for key in ('git', 'go', 'node', 'python')}})
+            process = MagicMock()
+            process.poll.return_value = None
+            stop = MagicMock()
+            stop.wait.side_effect = [False, False, False, True]
+            events = []
+            def ready(*args):
+                events.append('ready')
+                return len(events) > 1
+            def cleanup(*args):
+                events.append('cleanup')
+            with patch.dict(os.environ, {}, clear=True), \
+                    patch.object(setup, 'activate_tools'), \
+                    patch.object(setup.subprocess, 'check_output', return_value='{"port":4669}'), \
+                    patch.object(setup.subprocess, 'run'), \
+                    patch.object(setup.subprocess, 'Popen', return_value=process) as launch, \
+                    patch.object(setup.signal, 'signal'), \
+                    patch.object(setup.threading, 'Event', return_value=stop), \
+                    patch.object(setup.threading, 'Thread') as watcher, \
+                    patch.object(setup, 'servers_ready', side_effect=ready), \
+                    patch.object(setup, 'cleanup_releases', side_effect=cleanup) as clean:
+                watcher.return_value.start.side_effect = lambda: events.append('watch')
+                setup.run_servers(home)
+                self.assertEqual(events, ['ready', 'ready', 'ready', 'cleanup', 'watch'])
+                token = launch.call_args_list[0].kwargs['env']['NULAS_RUN_INSTANCE']
+                self.assertEqual(clean.call_args.args[2], token)
+                self.assertEqual(len(token), 64)
 
     def test_run_reads_saved_ports_and_uses_shared_node_launcher(self):
         with tempfile.TemporaryDirectory() as temporary:

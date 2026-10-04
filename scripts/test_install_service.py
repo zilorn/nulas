@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 import install_service
+import setup
 from install_service import service_text, unit_quote, working_directory, uninstall_service
 
 
@@ -47,7 +48,36 @@ class ServiceTests(unittest.TestCase):
             unit = service_text(Path('/old/release'), '/opt/node/bin/node', home)
             self.assertIn('"' + str(home / 'bin/launcher.py') + '" run', unit)
             self.assertNotIn('scripts/start.sh', unit)
+            self.assertIn('WorkingDirectory=' + str(home) + '\n', unit)
             self.assertIn('KillMode=control-group', unit)
+
+    def test_cleanup_migrates_old_managed_service_before_reload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / 'install'
+            home.mkdir()
+            (home / 'installation.json').write_text(json.dumps({'tools': {'python': '/usr/bin/python3'}}))
+            config = Path(directory) / 'config'
+            unit = config / 'systemd/user/nulas.service'
+            unit.parent.mkdir(parents=True)
+            old = home / 'releases/old'
+            content = service_text(old, '/usr/bin/node', home).replace(
+                'WorkingDirectory=' + str(home), 'WorkingDirectory=' + str(old))
+            unit.write_text(content)
+            def reload(*args, **kwargs):
+                self.assertEqual(args, ('systemctl', '--user', 'daemon-reload'))
+                self.assertEqual(kwargs['timeout'], 10)
+                self.assertIn('WorkingDirectory=' + str(home) + '\n', unit.read_text())
+                self.assertIn('EnvironmentFile=-%h/.config/nulas/service.env', unit.read_text())
+            with patch.dict(setup.os.environ, {'XDG_CONFIG_HOME': str(config)}), \
+                    patch.object(setup.sys, 'platform', 'linux'), \
+                    patch.object(setup, 'command', side_effect=reload) as command:
+                setup.migrate_service_directory(home)
+                setup.migrate_service_directory(home)
+                self.assertEqual(command.call_count, 2)
+                unit.write_text('[Service]\nWorkingDirectory=/other\n')
+                with self.assertRaisesRegex(RuntimeError, 'ownership'):
+                    setup.migrate_service_directory(home)
+                self.assertEqual(command.call_count, 2)
 
     def test_uninstall_checks_ownership_and_stops_before_deleting(self):
         with tempfile.TemporaryDirectory() as directory:

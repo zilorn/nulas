@@ -227,7 +227,7 @@ func (a *App) handler(apiPort, devPort int) http.Handler {
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		reply(w, 200, map[string]any{"status": "ok", "controllerConfigured": a.controller != ""})
+		reply(w, 200, map[string]any{"status": "ok", "controllerConfigured": a.controller != "", "instance": os.Getenv("NULAS_RUN_INSTANCE")})
 	})
 	mux.HandleFunc("GET /api/core", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()

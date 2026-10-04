@@ -31,7 +31,7 @@ def service_text(root, node, installation=None):
         metadata = json.loads((installation / "installation.json").read_text(encoding="utf-8"))
         start = ":" + unit_quote(metadata["tools"]["python"]) + " " + unit_quote(str(installation / "bin/launcher.py")) + " run"
     return (MARKER + "[Unit]\nDescription=Nulas frontend and backend\n\n[Service]\n"
-            + "Type=simple\nWorkingDirectory=" + working_directory(str(root)) + "\n"
+            + "Type=simple\nWorkingDirectory=" + working_directory(str(installation or root)) + "\n"
             + "Environment=" + unit_quote("PATH=" + str(Path(node).parent) + ":/usr/local/bin:/usr/bin:/bin") + "\n"
             + "EnvironmentFile=-%h/.config/nulas/service.env\n"
             + "ExecStart=" + start + "\n"
