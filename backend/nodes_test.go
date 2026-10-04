@@ -141,13 +141,13 @@ func TestWriteOriginProtection(t *testing.T) {
 		host, origin string
 		status       int
 	}{
-		{"localhost:3000", "http://localhost:3000", 201},
-		{"127.0.0.1:3000", "http://127.0.0.1:3000", 201},
-		{"127.0.0.1:8080", "http://127.0.0.1:8080", 201},
-		{"localhost:3000", "http://evil.example", 403},
-		{"localhost:3000", "http://localhost:4000", 403},
-		{"localhost:3000", "https://localhost:3000", 403},
-		{"localhost:3000", "null", 403},
+		{"localhost:4669", "http://localhost:4669", 201},
+		{"127.0.0.1:4669", "http://127.0.0.1:4669", 201},
+		{"127.0.0.1:4589", "http://127.0.0.1:4589", 201},
+		{"localhost:4669", "http://evil.example", 403},
+		{"localhost:4669", "http://localhost:4000", 403},
+		{"localhost:4669", "https://localhost:4669", 403},
+		{"localhost:4669", "null", 403},
 	} {
 		t.Run(test.host+test.origin, func(t *testing.T) {
 			a := testApp(t, "")
@@ -157,18 +157,18 @@ func TestWriteOriginProtection(t *testing.T) {
 			// Forwarded headers must not bypass the browser origin check.
 			r.Header.Set("X-Forwarded-Host", "evil.example")
 			w := httptest.NewRecorder()
-			a.handler().ServeHTTP(w, r)
+			a.handler(4669, 4589).ServeHTTP(w, r)
 			if w.Code != test.status {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 			}
 		})
 	}
 	a := testApp(t, "")
-	r := httptest.NewRequest("PUT", "http://localhost/api/runtime/mode", strings.NewReader(`{"mode":"direct"}`))
+	r := httptest.NewRequest("PUT", "http://localhost:4669/api/runtime/mode", strings.NewReader(`{"mode":"direct"}`))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Origin", "http://evil.example")
 	w := httptest.NewRecorder()
-	a.handler().ServeHTTP(w, r)
+	a.handler(4669, 4589).ServeHTTP(w, r)
 	if w.Code != 403 {
 		t.Fatal("runtime write bypassed origin guard")
 	}
@@ -257,11 +257,11 @@ func TestNodeDelay(t *testing.T) {
 
 func TestNodeDelayOriginProtection(t *testing.T) {
 	a := testApp(t, "")
-	r := httptest.NewRequest("POST", "http://localhost/api/nodes/delay", strings.NewReader(`{"name":"node"}`))
+	r := httptest.NewRequest("POST", "http://localhost:4669/api/nodes/delay", strings.NewReader(`{"name":"node"}`))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Origin", "http://evil.example")
 	w := httptest.NewRecorder()
-	a.handler().ServeHTTP(w, r)
+	a.handler(4669, 4589).ServeHTTP(w, r)
 	if w.Code != 403 {
 		t.Fatal("delay probe bypassed origin guard")
 	}

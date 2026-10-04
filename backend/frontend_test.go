@@ -12,7 +12,7 @@ func TestSSRFrontend(t *testing.T) {
 	var paths []string
 	ssr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.RequestURI())
-		if r.Host != "nulas.local" || r.Header.Get("X-Forwarded-Host") != "" {
+		if r.Host != "localhost:4669" || r.Header.Get("X-Forwarded-Host") != "" {
 			t.Error("SSR must preserve original host and discard untrusted forwarded headers")
 		}
 		w.Header().Set("Content-Type", "text/html")
@@ -21,9 +21,9 @@ func TestSSRFrontend(t *testing.T) {
 	defer ssr.Close()
 	t.Setenv("NULAS_WEB_DIR", "")
 	t.Setenv("NULAS_SSR_URL", ssr.URL)
-	handler := testApp(t, "").handler()
+	handler := testApp(t, "").handler(4669, 4589)
 	for _, path := range []string{"/", "/tasks", "/nodes", "/?view=profiles", "/_build/assets/app.js"} {
-		r := httptest.NewRequest("GET", "http://nulas.local"+path, nil)
+		r := httptest.NewRequest("GET", "http://localhost:4669"+path, nil)
 		r.Header.Set("X-Forwarded-Host", "evil.example")
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
@@ -36,19 +36,19 @@ func TestSSRFrontend(t *testing.T) {
 	}
 	for _, path := range []string{"/api/health", "/api/unknown"} {
 		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		handler.ServeHTTP(w, httptest.NewRequest("GET", "http://localhost:4669"+path, nil))
 		if strings.Contains(w.Body.String(), "SSR page") || len(paths) != 5 {
 			t.Fatal("API request forwarded to SSR")
 		}
 	}
 	ssr.Close()
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, httptest.NewRequest("GET", "/nodes", nil))
+	handler.ServeHTTP(w, httptest.NewRequest("GET", "http://localhost:4669/nodes", nil))
 	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "SSR frontend unavailable") {
 		t.Fatalf("SSR outage should be visible: %d %s", w.Code, w.Body.String())
 	}
 	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/health", nil))
+	handler.ServeHTTP(w, httptest.NewRequest("GET", "http://localhost:4669/api/health", nil))
 	if w.Code != 200 {
 		t.Fatal("API unavailable during SSR outage")
 	}
@@ -86,7 +86,7 @@ func TestSavedSSRPortRoutesPages(t *testing.T) {
 		t.Fatal(stderr.String())
 	}
 	w := httptest.NewRecorder()
-	frontendHandler().ServeHTTP(w, httptest.NewRequest("GET", "/nodes", nil))
+	frontendHandler().ServeHTTP(w, httptest.NewRequest("GET", "http://localhost:4669/nodes", nil))
 	if w.Code != 200 || w.Body.String() != "saved SSR" {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}

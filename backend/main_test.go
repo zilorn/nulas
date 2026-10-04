@@ -19,10 +19,10 @@ func testApp(t *testing.T, controller string) *App {
 	return a
 }
 func request(a *App, method, path, body string) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(method, path, strings.NewReader(body))
+	r := httptest.NewRequest(method, "http://127.0.0.1:4669"+path, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	a.handler().ServeHTTP(w, r)
+	a.handler(4669, 4589).ServeHTTP(w, r)
 	return w
 }
 func TestConfigurationValidationAndPersistence(t *testing.T) {
@@ -119,11 +119,11 @@ func TestApplyFailureAndRecovery(t *testing.T) {
 }
 func TestCrossOriginAndLimits(t *testing.T) {
 	a := testApp(t, "")
-	r := httptest.NewRequest("POST", "http://localhost/api/jobs", strings.NewReader(`{"action":"generate"}`))
+	r := httptest.NewRequest("POST", "http://localhost:4669/api/jobs", strings.NewReader(`{"action":"generate"}`))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Origin", "http://evil.example")
 	w := httptest.NewRecorder()
-	a.handler().ServeHTTP(w, r)
+	a.handler(4669, 4589).ServeHTTP(w, r)
 	if w.Code != 403 {
 		t.Fatal("cross-origin request accepted")
 	}

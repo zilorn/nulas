@@ -270,7 +270,7 @@ macOS/Windows 使用 pystray 原生后端；Linux 需要 GTK/AppIndicator 的 Py
 
 ## 注意事项
 
-- **仅限本机**：API 与 SSR 默认绑定回环地址，同源写入校验、拒绝外站请求，不信任客户端转发头。远程部署必须自行实现认证与 TLS；不要把控制接口凭据放进前端或提交到仓库。
+- **仅限本机**：API 与 SSR 默认绑定回环地址，所有请求的 Host 仅允许 `127.0.0.1`、`localhost`、`[::1]` 加实际 API 监听端口或配置的开发端口（启动时固定），拒绝 DNS rebinding 使用的外部域名；写入还会校验同源 Origin，不信任客户端转发头。API 无认证，本机进程仍可直接调用。远程部署必须自行实现认证与 TLS；不要把控制接口凭据放进前端或提交到仓库。
 - **不要提权**：只给 Mihomo 二进制授予必要能力（如 `sudo setcap cap_net_admin,cap_net_raw+ep <mihomo>`），不要以 root 运行 Nulas 或 Node，也不要使用 `sudo nulas`。
 - **平台限制**：系统代理仅支持具有桌面会话与 `gsettings` 的 Linux GNOME 普通用户环境；TUN 管理仅支持 Nulas 启动的 Linux 托管内核（外部控制器与其他系统不提供）；开机自启为 Linux 用户级 systemd。跨平台托盘不会改变这些边界。
 - **偏好与实测分离**：开关偏好保存在 `NULAS_DATA_DIR/state.json` 的 `preferences`，启动任务完成后，通过新建并持久保存的后台任务恢复已保存的系统代理 / TUN 开启偏好；TUN 在恢复检查通过前保持关闭。上次失败或被中断的网络操作需手动重试，已有排队操作继续执行，不重复恢复；页面显示的实测状态与保存偏好可能不同，失败会显式标注。

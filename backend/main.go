@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -197,7 +198,21 @@ func decodeJSON(reader io.Reader, v any) error {
 	}
 	return nil
 }
-func (a *App) handler() http.Handler {
+func (a *App) handler(apiPort, devPort int) http.Handler {
+	// Hosts are fixed at startup, independently of request and forwarding headers.
+	allowedHosts := make(map[string]bool)
+	for _, port := range []int{apiPort, devPort} {
+		if port < 1 || port > 65535 {
+			continue
+		}
+		for _, host := range []string{"127.0.0.1", "localhost", "::1"} {
+			allowedHosts[net.JoinHostPort(host, strconv.Itoa(port))] = true
+			// Browsers omit HTTP's default port in Host and Origin.
+			if port == 80 {
+				allowedHosts[strings.TrimSuffix(net.JoinHostPort(host, "80"), ":80")] = true
+			}
+		}
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/", frontendHandler())
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, errors.New("unknown API endpoint")) })
@@ -348,9 +363,13 @@ func (a *App) handler() http.Handler {
 		}
 		reply(w, 202, publicJob(j))
 	})
-	// Reject cross-origin writes, including form submissions from other sites.
+	// Reject DNS rebinding for all requests, then cross-origin writes and forms.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		if !allowedHosts[r.Host] {
+			fail(w, http.StatusForbidden, errors.New("untrusted request host"))
+			return
+		}
 		if r.Method == "PUT" || r.Method == "POST" || r.Method == "PATCH" || r.Method == "DELETE" {
 			if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 				fail(w, 415, errors.New("application/json required"))
@@ -598,6 +617,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	_, _, ports, err := readServerConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
 	a, e := newApp(env("NULAS_DATA_DIR", ".data"), os.Getenv("MIHOMO_CONTROLLER"), os.Getenv("MIHOMO_SECRET"))
 	if e != nil {
 		log.Fatal(e)
@@ -636,7 +659,7 @@ func main() {
 	}
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); a.worker(ctx) }()
-	s := &http.Server{Addr: addr, Handler: a.handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	s := &http.Server{Addr: addr, Handler: a.handler(listener.Addr().(*net.TCPAddr).Port, ports["dev-port"]), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	log.Printf("Nulas web and API listening on http://%s", listener.Addr())
 	go func() {
 		<-ctx.Done()
