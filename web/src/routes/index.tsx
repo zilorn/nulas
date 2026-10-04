@@ -25,9 +25,19 @@ export default function Home() {
  const update = <K extends keyof Config>(key: K,value: Config[K]) => setConfig({...config(),[key]:value});
  async function save(action?:string) {
   setBusy(true);setError("");setNotice("");
-  try { await api("config",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(config())});
-   if(action){await api("jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action})});setNotice(t("后台任务已提交，可在后台任务页查看结果，关闭网页后仍会继续执行。"));}else setNotice(t("配置已保存。"));await refresh();
-  }catch(e){setError((e as Error).message);}finally{setBusy(false);}
+  try {
+   try {
+    await api("config",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(config())});
+   } catch(e) { setError((e as Error).message);return; }
+   setNotice(t("配置已保存。"));
+   if(action) {
+    try {
+     await api("jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action})});
+     setNotice(t("配置已保存。后台任务已提交，可在后台任务页查看结果，关闭网页后仍会继续执行。"));
+    } catch(e) { setError(t("后台任务提交失败：{message}",{message:(e as Error).message})); }
+   }
+   await refresh();
+  } finally { setBusy(false); }
  }
  return <Workspace page={view()} online={online()}>
   <Show when={view()==="profiles"}><ConfigurationManager onLoad={c=>{setConfig(c);setReady(true);setSearchParams({ view: undefined });setError("");setNotice(t("配置已载入，可继续编辑；应用到内核需单独提交任务。"));}} /></Show>

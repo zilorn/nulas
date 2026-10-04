@@ -7,6 +7,7 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test:nodes": "node tests/nodes.test.ts",
+    "test:config-save": "node tests/config-save.test.ts",
     "preview": "vite preview",
     "start": "node scripts/start.mjs",
     "test:i18n": "node tests/i18n.test.ts"
