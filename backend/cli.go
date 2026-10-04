@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,12 +23,14 @@ func execCLI(ctx context.Context, stdout, stderr io.Writer, name string, args ..
 	return cmd.Run()
 }
 
-const cliUsage = `Usage: nulas [install|uninstall|remove|status|start|stop|restart|run|update|config [KEY [PORT]]]
+const cliUsage = `Usage: nulas [open|install|uninstall|remove|status|start|stop|restart|run|update|config [KEY [PORT]]]
 
   config [KEY [PORT]] Show all ports, or show/save one (1–65535; restart to apply).
                      Keys: port (web/API), ssr-port, dev-port.
                      config --json prints saved/default values as JSON.
 
+  open     Open the configured Web/API URL in the default browser.
+           Start Nulas first; requires a desktop browser session.
   run      Run both servers in foreground (quick installation required).
   update   Check/build/install updates (quick installation required).
            --check, --auto on|off|status, --watch
@@ -63,6 +67,13 @@ func runCLI(args []string, stdout, stderr io.Writer, run cliRunner, executable f
 	}
 	if len(args) > 0 && args[0] == "config" {
 		return runPortConfig(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "open" {
+		if len(args) != 1 {
+			fmt.Fprint(stderr, cliUsage)
+			return 2
+		}
+		return runOpen(runtime.GOOS, stdout, stderr, run)
 	}
 	if len(args) > 0 && (args[0] == "update" || args[0] == "run" || args[0] == "remove") {
 		if args[0] == "remove" && len(args) != 1 {
@@ -156,5 +167,47 @@ func runCLI(args []string, stdout, stderr io.Writer, run cliRunner, executable f
 		fmt.Fprintln(stdout, "请访问 Web/API 入口；SSR 端口仅供内部页面渲染，直接访问会导致 API 请求失败。")
 		fmt.Fprintln(stdout, "若 service.env 覆盖了端口，请以服务启动日志为准；服务运行状态可用 nulas status 查看。")
 	}
+	return 0
+}
+
+func runOpen(platform string, stdout, stderr io.Writer, run cliRunner) int {
+	addr, err := serverAddress()
+	if err != nil {
+		return cliExit(err, stderr)
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return cliExit(fmt.Errorf("invalid Nulas browser address: %w", err), stderr)
+	}
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 1 || number > 65535 || strings.ContainsAny(host, "/\\?#@%\"' \t\r\n") {
+		return cliExit(errors.New("invalid Nulas browser address"), stderr)
+	}
+	// A wildcard listen address is not a browser destination.
+	if host == "" || host == "0.0.0.0" {
+		host = "127.0.0.1"
+	} else if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		host = "::1"
+	}
+	url := "http://" + net.JoinHostPort(host, port) + "/"
+	fmt.Fprintln(stdout, url)
+	var name string
+	var args []string
+	switch platform {
+	case "linux":
+		name, args = "xdg-open", []string{url}
+	case "darwin":
+		name, args = "open", []string{url}
+	case "windows":
+		name, args = "rundll32.exe", []string{"url.dll,FileProtocolHandler", url}
+	default:
+		return cliExit(fmt.Errorf("opening a browser is unsupported on %s; open the URL manually", platform), stderr)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := run(ctx, stdout, stderr, name, args...); err != nil {
+		return cliExit(fmt.Errorf("could not open the default browser; open the URL manually (a desktop session is required): %w", err), stderr)
+	}
+	fmt.Fprintln(stdout, "Browser open requested. Nulas must already be running.")
 	return 0
 }

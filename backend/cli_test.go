@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -97,7 +98,7 @@ func TestCLIFailureIsVisible(t *testing.T) {
 }
 
 func TestCLIHelpAndInvalidArguments(t *testing.T) {
-	for _, args := range [][]string{{"--help"}, {"help"}, {"-h"}, {"unknown"}, {"start", "extra"}, {"uninstall", "extra"}, {"remove", "extra"}} {
+	for _, args := range [][]string{{"--help"}, {"help"}, {"-h"}, {"unknown"}, {"open", "extra"}, {"start", "extra"}, {"uninstall", "extra"}, {"remove", "extra"}} {
 		var stdout, stderr bytes.Buffer
 		want := 2
 		if len(args) == 1 && args[0] != "unknown" {
@@ -106,6 +107,94 @@ func TestCLIHelpAndInvalidArguments(t *testing.T) {
 		if code := runCLI(args, &stdout, &stderr, nil, nil); code != want {
 			t.Fatalf("%v: %d", args, code)
 		}
+	}
+}
+
+func TestCLIOpen(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("NULAS_ADDR", "")
+	for _, port := range []string{"4669", "4769"} {
+		if port == "4769" {
+			if code := runPortConfig([]string{"port", port}, io.Discard, io.Discard); code != 0 {
+				t.Fatal("cannot save test port")
+			}
+		}
+		var out, stderr bytes.Buffer
+		calls := 0
+		run := func(ctx context.Context, _, _ io.Writer, _ string, args ...string) error {
+			calls++
+			if _, ok := ctx.Deadline(); !ok {
+				t.Fatal("browser command lacks timeout")
+			}
+			if args[len(args)-1] != "http://127.0.0.1:"+port+"/" {
+				t.Fatalf("wrong browser URL: %v", args)
+			}
+			return nil
+		}
+		if code := runCLI([]string{"open"}, &out, &stderr, run, nil); code != 0 || calls != 1 {
+			t.Fatalf("code=%d calls=%d stderr=%s on %s", code, calls, &stderr, runtime.GOOS)
+		}
+	}
+}
+
+func TestOpenPlatformsAndOverrides(t *testing.T) {
+	for _, tc := range []struct {
+		platform, addr, url, command string
+		prefix                       []string
+	}{
+		{"linux", "127.0.0.1:4869", "http://127.0.0.1:4869/", "xdg-open", nil},
+		{"darwin", "0.0.0.0:4869", "http://127.0.0.1:4869/", "open", nil},
+		{"windows", "[::]:4869", "http://[::1]:4869/", "rundll32.exe", []string{"url.dll,FileProtocolHandler"}},
+	} {
+		t.Run(tc.platform, func(t *testing.T) {
+			t.Setenv("NULAS_ADDR", tc.addr)
+			calls := 0
+			run := func(_ context.Context, _, _ io.Writer, name string, args ...string) error {
+				calls++
+				if name != tc.command || !reflect.DeepEqual(args, append(tc.prefix, tc.url)) {
+					t.Fatalf("unexpected browser command: %s %v", name, args)
+				}
+				return nil
+			}
+			if code := runOpen(tc.platform, io.Discard, io.Discard, run); code != 0 || calls != 1 {
+				t.Fatalf("code=%d calls=%d", code, calls)
+			}
+		})
+	}
+}
+
+func TestOpenFailures(t *testing.T) {
+	t.Setenv("NULAS_ADDR", "127.0.0.1:4869")
+	var out, stderr bytes.Buffer
+	run := func(_ context.Context, _, _ io.Writer, _ string, _ ...string) error {
+		return errors.New("browser unavailable")
+	}
+	if code := runOpen("linux", &out, &stderr, run); code == 0 || !bytes.Contains(out.Bytes(), []byte("http://127.0.0.1:4869/")) || !bytes.Contains(stderr.Bytes(), []byte("browser unavailable")) || bytes.Contains(out.Bytes(), []byte("Browser open requested")) {
+		t.Fatalf("code=%d out=%s stderr=%s", code, &out, &stderr)
+	}
+	if code := runOpen("unsupported", io.Discard, io.Discard, nil); code == 0 {
+		t.Fatal("unsupported platform succeeded")
+	}
+	for _, addr := range []string{"invalid", "localhost:0", "localhost:65536", "user@localhost:4669", "localhost/path:4669"} {
+		t.Setenv("NULAS_ADDR", addr)
+		if code := runOpen("linux", io.Discard, io.Discard, nil); code == 0 {
+			t.Fatalf("invalid address accepted: %s", addr)
+		}
+	}
+	t.Setenv("NULAS_ADDR", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path, err := serverConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("invalid JSON"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if code := runOpen("linux", io.Discard, io.Discard, nil); code == 0 {
+		t.Fatal("invalid config accepted")
 	}
 }
 

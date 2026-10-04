@@ -144,10 +144,13 @@ Run as a regular user from the project root:
 export PATH="$PWD/bin:$PATH"   # Use nulas directly in the current terminal
 nulas install                  # Install the combined frontend/backend service without starting it or enabling start at login
 nulas start                    # Start the backend and frontend
+nulas open                     # Open the web dashboard in the default browser
 nulas status                   # Show the combined service status
 ```
 
 Open [http://127.0.0.1:4669](http://127.0.0.1:4669). `nulas stop` / `nulas restart` stop or restart the frontend and backend together, and `nulas --help` lists the commands. You can add the absolute path of the project's `bin` directory to your shell configuration's PATH. The service depends on the current project path and build output, so rerun `./scripts/build.sh` and `nulas restart` after updating the code; after moving the directory or changing the Node path, rerun `nulas install` first.
+
+After starting the service, run `nulas open` to open the Web/API entry point configured in the CLI in your default browser. The command supports Linux (requires `xdg-open`), macOS and Windows, reads the port saved through `nulas config port`, and honors `NULAS_ADDR` in the current environment first; wildcard listen addresses `0.0.0.0` and `::` are replaced with the corresponding loopback address. It opens the page without starting the service; if the service overrides its port separately through `service.env`, use the entry point in the service startup log. When a desktop session is unavailable or the browser cannot be launched, the command reports an error and also prints the URL for manual opening.
 
 The footer on every page links to this project's GitHub repository and shows “Built from [git hash]”. The revision is written from Git HEAD at frontend build time, shown as the first 7 characters with the full hash on hover, or “Unknown build revision” when no Git information is available. When building from a source archive, provide the matching commit hash (7–40 hexadecimal characters) through the `NULAS_BUILD_HASH` environment variable.
 

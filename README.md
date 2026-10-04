@@ -144,10 +144,13 @@ Windows 使用 `mihomo.exe`。Nulas 后端默认自动安装并启动本地内�
 export PATH="$PWD/bin:$PATH"   # 当前终端直接使用 nulas
 nulas install                  # 安装前后端组合服务，不启动、不启用自启
 nulas start                    # 启动后端与前端
+nulas open                     # 在默认浏览器中打开网页
 nulas status                   # 查看组合服务状态
 ```
 
 打开 [http://127.0.0.1:4669](http://127.0.0.1:4669)。`nulas stop` / `nulas restart` 同时停止或重启前后端，`nulas --help` 查看命令。可将项目 `bin` 的绝对路径加入 shell 配置的 PATH。服务依赖当前项目路径与构建产物，更新代码后重新执行 `./scripts/build.sh` 与 `nulas restart`；迁移目录或更换 Node 路径后先重新执行 `nulas install`。
+
+服务启动后，执行 `nulas open` 可在默认浏览器中打开当前 CLI 配置的 Web/API 入口。该命令支持 Linux（需要 `xdg-open`）、macOS 和 Windows，读取 `nulas config port` 保存的端口，并优先使用当前环境的 `NULAS_ADDR`；监听地址为 `0.0.0.0` 或 `::` 时会改用对应的本机回环地址。命令只打开网页，不启动服务；若服务通过 `service.env` 单独覆盖端口，请以服务启动日志中的入口为准。无桌面会话或无法启动浏览器时，命令会显示错误，网址也会输出以便手动打开。
 
 所有页面的页脚提供本项目 GitHub 仓库入口，并显示「由 [git hash] 构建」。版本在前端构建时从 Git HEAD 写入，显示前 7 位，悬停可查看完整 hash；无 Git 信息时显示「构建版本未知」。从源码归档构建时，可通过 `NULAS_BUILD_HASH` 环境变量提供对应提交的 hash（7–40 位十六进制字符）。
 
