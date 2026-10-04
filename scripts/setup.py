@@ -208,12 +208,17 @@ def dependencies(home):
     tools.mkdir(exist_ok=True)
     if not version_ok('node', (24, 0)):
         index = json.loads(download('https://nodejs.org/dist/index.json'))
-        version = next(v['version'] for v in index if v['version'].startswith('v24.'))
+        version = next((v['version'] for v in index if v['version'].startswith('v24.')), None)
+        if version is None:
+            raise RuntimeError('Node.js download index contains no Node.js 24 release')
         suffix = '.zip' if system == 'win' else '.tar.gz'
         filename = f'node-{version}-{system}-{arch}{suffix}'
         base = f'https://nodejs.org/dist/{version}/'
         sums = download(base + 'SHASUMS256.txt').decode()
-        digest = next(line.split()[0] for line in sums.splitlines() if line.split()[-1] == filename)
+        digest = next((fields[0] for line in sums.splitlines()
+                       if len(fields := line.split()) == 2 and fields[1] == filename), None)
+        if digest is None:
+            raise RuntimeError('Node.js checksum manifest contains no entry for ' + filename)
         unpack(download(base + filename), digest, tools, suffix)
         node_dir = tools / filename.removesuffix(suffix)
         node_bin = node_dir if system == 'win' else node_dir / 'bin'
@@ -222,8 +227,10 @@ def dependencies(home):
         index = json.loads(download('https://go.dev/dl/?mode=json'))
         go_os = 'windows' if system == 'win' else system
         go_arch = 'amd64' if arch == 'x64' else arch
-        asset = next(f for v in index if v['stable'] for f in v['files']
-                     if f['os'] == go_os and f['arch'] == go_arch and f['kind'] == 'archive')
+        asset = next((f for v in index if v['stable'] for f in v['files']
+                      if f['os'] == go_os and f['arch'] == go_arch and f['kind'] == 'archive'), None)
+        if asset is None:
+            raise RuntimeError(f'Go download index contains no stable archive for {go_os}/{go_arch}')
         suffix = '.zip' if system == 'win' else '.tar.gz'
         target = tools / asset['version']
         if not target.exists():
@@ -531,7 +538,7 @@ def add_path(home, user_home=None, remove=False):
         ctypes.windll.user32.SendMessageTimeoutW(0xffff, 0x1a, 0, 'Environment', 2, 5000, ctypes.byref(result))
         return
     quoted = shlex.quote(bin_dir)
-    line = '\n# Nulas CLI\nexport PATH=' + quoted + ':"$PATH"\n'
+    line = ('\n# Nulas CLI\nexport PATH=' + quoted + ':"$PATH"\n').encode('utf-8')
     paths = [user_home / '.bashrc', user_home / '.profile',
              Path(os.environ.get('ZDOTDIR', str(user_home))) / '.zshrc']
     # Bash login shells read only the first existing login file.
@@ -543,42 +550,54 @@ def add_path(home, user_home=None, remove=False):
         if remove and not path.exists():
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
-        existing = path.read_text() if path.exists() else ''
+        existing = path.read_bytes() if path.exists() else b''
         if remove:
             if line in existing:
-                path.write_text(existing.replace(line, ''))
+                shell_file(path, existing.replace(line, b''))
         elif line not in existing:
-            with path.open('a') as stream:
-                stream.write(line)
+            shell_file(path, existing + line)
     fish = Path(os.environ.get('XDG_CONFIG_HOME', str(user_home / '.config'))) / 'fish/conf.d/nulas.fish'
     if remove and not fish.exists():
         return
     fish.parent.mkdir(parents=True, exist_ok=True)
     # Single-quoted fish strings support escaped backslash and quote.
     fish_path = "'" + bin_dir.replace('\\', '\\\\').replace("'", "\\'") + "'"
-    fish_line = '\n# Nulas CLI\nfish_add_path --path ' + fish_path + '\n'
-    existing = fish.read_text() if fish.exists() else ''
+    fish_line = ('\n# Nulas CLI\nfish_add_path --path ' + fish_path + '\n').encode('utf-8')
+    existing = fish.read_bytes() if fish.exists() else b''
     if remove:
         if fish_line in existing:
-            remaining = existing.replace(fish_line, '')
+            remaining = existing.replace(fish_line, b'')
             if remaining:
-                fish.write_text(remaining)
+                shell_file(fish, remaining)
             else:
                 fish.unlink()
     elif fish_line not in existing:
-        with fish.open('a') as stream:
-            stream.write(fish_line)
+        shell_file(fish, existing + fish_line)
 
 
-def launcher_file(path, content, executable=False):
+def shell_file(path, content):
+    # Keep dotfile symlinks and arbitrary existing encodings intact. Replace the
+    # target in its own directory, retaining permissions instead of mkstemp's 0600.
+    target = path.resolve()
+    mode = target.stat().st_mode & 0o7777 if target.exists() else 0o600
+    launcher_file(target, content, mode=mode)
+    # Persist the directory entry as well as the file contents on POSIX.
+    fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def launcher_file(path, content, executable=False, mode=None):
     fd, name = tempfile.mkstemp(dir=path.parent, prefix='.launcher-')
     try:
         with os.fdopen(fd, 'wb') as stream:
             stream.write(content)
+            if mode is not None or executable:
+                os.chmod(name, mode if mode is not None else 0o755)
             stream.flush()
             os.fsync(stream.fileno())
-        if executable:
-            os.chmod(name, 0o755)
         os.replace(name, path)
     finally:
         if os.path.exists(name):

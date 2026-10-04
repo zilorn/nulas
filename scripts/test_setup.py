@@ -63,6 +63,73 @@ class SetupTests(unittest.TestCase):
             fetch.assert_not_called()
             install.assert_not_called()
 
+    def test_missing_dependency_assets_report_useful_errors(self):
+        cases = [
+            (False, [], 'no Node.js 24 release'),
+            (False, [{'version': 'v24.1.0'}], 'no entry for node-v24.1.0-linux-x64.tar.gz'),
+            (True, [{'stable': True, 'files': []}], 'no stable archive for linux/amd64'),
+        ]
+        for node_ready, index, message in cases:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as temporary, \
+                    patch.object(setup.platform, 'system', return_value='Linux'), \
+                    patch.object(setup.platform, 'machine', return_value='x86_64'), \
+                    patch.object(setup, 'version_ok', side_effect=lambda name, minimum: name == 'git' or (name == 'node' and node_ready)), \
+                    patch.object(setup.shutil, 'which', return_value='/existing/git'), \
+                    patch.object(setup, 'download', side_effect=[json.dumps(index).encode(), b'\nmalformed\n']), \
+                    patch.object(setup, 'unpack') as unpack:
+                with self.assertRaisesRegex(RuntimeError, message):
+                    setup.dependencies(Path(temporary))
+                unpack.assert_not_called()
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX shell configuration')
+    def test_shell_paths_preserve_bytes_modes_and_symlinks(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {}, clear=True):
+            user = Path(temporary)
+            home = user / '应用'
+            original = b'# legacy encoding: \xff\r\nexport KEEP=yes\r\n'
+            target = user / 'bash-settings'
+            target.write_bytes(original)
+            target.chmod(0o640)
+            (user / '.bashrc').symlink_to(target.name)
+            profile = user / '.profile'
+            profile.write_bytes(original)
+            profile.chmod(0o644)
+            fish = user / '.config/fish/conf.d/nulas.fish'
+            fish.parent.mkdir(parents=True)
+            fish.write_bytes(original)
+            marker = ('\n# Nulas CLI\nexport PATH=' + setup.shlex.quote(str(home / 'bin')) + ':"$PATH"\n').encode('utf-8')
+            for remove, sync_count in ((False, 8), (False, 0), (True, 8)):
+                with patch.object(setup.os, 'fsync', wraps=os.fsync) as sync:
+                    setup.add_path(home, user, remove=remove)
+                self.assertEqual(sync.call_count, sync_count)
+                self.assertEqual(target.read_bytes(), original if remove else original + marker)
+                self.assertTrue((user / '.bashrc').is_symlink())
+                self.assertEqual(target.stat().st_mode & 0o777, 0o640)
+                self.assertEqual(profile.stat().st_mode & 0o777, 0o644)
+                self.assertTrue(target.read_bytes().startswith(original))
+            for path in (target, profile, fish):
+                self.assertEqual(path.read_bytes(), original)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX shell configuration')
+    def test_shell_write_failures_preserve_original_and_remove_temporary(self):
+        for operation in ('fsync', 'replace'):
+            for remove in (False, True):
+                with self.subTest(operation=operation, remove=remove), tempfile.TemporaryDirectory() as temporary, \
+                        patch.dict(os.environ, {}, clear=True):
+                    user = Path(temporary)
+                    home = user / 'app'
+                    if remove:
+                        setup.add_path(home, user)
+                    path = user / '.bashrc'
+                    if not remove:
+                        path.write_bytes(b'keep \xff\r\n')
+                    original = path.read_bytes()
+                    with patch.object(setup.os, operation, side_effect=OSError('disk failure')):
+                        with self.assertRaisesRegex(OSError, 'disk failure'):
+                            setup.add_path(home, user, remove=remove)
+                    self.assertEqual(path.read_bytes(), original)
+                    self.assertEqual(list(user.glob('.launcher-*')), [])
+
     def test_atomic_failure_preserves_current(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
