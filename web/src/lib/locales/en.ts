@@ -1,4 +1,7 @@
 export const en = {
+ "API 返回了非 JSON 响应，请使用生产 Web/API 入口（通过 nulas config port 查询），并确认 Go 后端已启动；SSR 端口不提供 API。": "The API returned a non-JSON response. Use the production Web/API entry point (check it with nulas config port) and make sure the Go backend is running; the SSR port does not serve the API.",
+ "API 返回了无效的 JSON 响应，请检查后端服务。": "The API returned invalid JSON. Check the backend service.",
+ "请求失败（HTTP {status}）": "Request failed (HTTP {status})",
  "后端未连接，配置操作暂不可用；恢复连接后自动更新状态。": "The backend is disconnected. Configuration actions are unavailable until the connection is restored and status updates automatically.",
  "后端未连接，无法确认内核和后台任务状态；恢复连接后自动更新。": "The backend is disconnected. Core and background task status are unknown and will update automatically when the connection is restored.",
  "暂无任务": "No tasks yet",

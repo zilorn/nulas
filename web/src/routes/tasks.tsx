@@ -1,10 +1,11 @@
 import { useI18n } from "../lib/i18n";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import Workspace from "../components/Workspace";
-import { api, type Job } from "../lib/api";
+import { createApi, type Job } from "../lib/api";
 const labels: Record<string,string> = { queued:"等待执行", running:"执行中", succeeded:"已完成", failed:"失败" };
 export default function Tasks() {
  const { t, locale } = useI18n();
+ const api = createApi(t);
  const [jobs,setJobs] = createSignal<Job[]>([]);
  const [loading,setLoading] = createSignal(true);
  const [error,setError] = createSignal("");

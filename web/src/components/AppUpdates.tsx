@@ -1,11 +1,12 @@
 import { useI18n } from "../lib/i18n";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
-import { api, type Job } from "../lib/api";
+import { createApi, type Job } from "../lib/api";
 
 type UpdateStatus = { supported: boolean; message: string; installed: string; latest: string; checked: number; available: boolean; restartRequired: boolean; busy: boolean; job: Job | null; error: string };
 
 export default function AppUpdates() {
  const { t, locale } = useI18n();
+ const api = createApi(t);
  const [status, setStatus] = createSignal<UpdateStatus>();
  const [error, setError] = createSignal("");
  const [submitting, setSubmitting] = createSignal(false);

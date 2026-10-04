@@ -1,12 +1,13 @@
 import { useI18n } from "../lib/i18n";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { api, defaultConfig, type Config } from "../lib/api";
+import { createApi, defaultConfig, type Config } from "../lib/api";
 
 type Profile = { id: string; name: string; config: Config; source: string; created: string; full?: boolean; refreshable?: boolean; updateIntervalHours?: number; nextUpdate?: string; updatedAt?: string; refreshStatus?: string; refreshMessage?: string };
 type AppliedConfig = Profile & { appliedAt: string; jobId: string };
 const modes: Record<string, string> = { rule: "规则模式", global: "全局模式", direct: "直连模式" };
 export default function ConfigurationManager(props: { onLoad: (config: Config) => void }) {
  const { t, locale } = useI18n();
+ const api = createApi(t);
  const [profiles, setProfiles] = createSignal<Profile[]>([]);
  const [applied, setApplied] = createSignal<AppliedConfig | null>(null);
  const [controller, setController] = createSignal(false);

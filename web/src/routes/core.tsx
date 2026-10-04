@@ -1,11 +1,12 @@
 import { useI18n } from "../lib/i18n";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import Workspace from "../components/Workspace";
-import { api, type Job } from "../lib/api";
+import { createApi, type Job } from "../lib/api";
 type Management = { version: string; core: { status: string; message: string }; managed: boolean; busy: boolean; platform: string };
 type Release = { tag_name: string; published_at: string };
 export default function Core() {
  const { t, locale } = useI18n();
+ const api = createApi(t);
  const [state, setState] = createSignal<Management>();
  const [releases, setReleases] = createSignal<Release[]>([]);
  const [page, setPage] = createSignal(1);

@@ -313,3 +313,5 @@ macOS/Windows 使用 pystray 原生后端；Linux 需要 GTK/AppIndicator 的 Py
 The sidebar language selector supports Simplified Chinese and English. On first use it follows supported browser language preferences, falling back to Chinese. Manual selection is saved in a browser cookie for one year. SSR and initial hydration use Chinese; the selected language is applied after mounting. Page titles, accessible labels and date formatting follow the selected language.
 
 后端任务日志、运行诊断与第三方错误保留原文；已显示的操作通知保留触发时的语言。多语言维护规范见项目技能 [nulas-i18n](.agents/skills/nulas-i18n/SKILL.md)。运行 `cd web && pnpm test:i18n` 检查翻译覆盖与占位符。
+
+运行 `cd web && pnpm test` 执行全部前端测试（包括 API 错误和服务端端口配置）；`pnpm typecheck` 同时检查源码与 TypeScript 测试。

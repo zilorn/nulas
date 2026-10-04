@@ -19,7 +19,7 @@ const compiled = ts.transpile(handler.getText(ast), { target: ts.ScriptTarget.ES
 async function saveScenario(action?: string, failure?: "config" | "jobs", locale: Locale = "zh-CN") {
  const state = { busy: false, notice: "old notice", error: "old error", refreshed: 0 };
  const calls: { path: string; method?: string }[] = [];
- const save = new Function("api", "config", "setBusy", "setNotice", "setError", "t", "refresh", `${compiled}; return save;`)(
+ const save = new Function("api", "config", "setBusy", "setNotice", "setError", "t", "refresh", "online", "ready", "busy", "pending", `${compiled}; return save;`)(
   async (path: string, options: RequestInit) => {
    calls.push({ path, method: options.method });
    if (path === failure) throw new Error(path === "jobs" ? "已有待处理任务" : "保存被拒绝");
@@ -30,6 +30,10 @@ async function saveScenario(action?: string, failure?: "config" | "jobs", locale
   (value: string) => { state.error = value; },
   (message: string, parameters?: Record<string, string>) => translate(locale, message, parameters),
   async () => { state.refreshed++; },
+  () => true,
+  () => true,
+  () => state.busy,
+  () => false,
  );
  await save(action);
  assert.equal(state.busy, false);

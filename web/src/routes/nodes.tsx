@@ -1,13 +1,14 @@
 import { useI18n } from "../lib/i18n";
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import Workspace from "../components/Workspace";
-import { api } from "../lib/api";
+import { createApi } from "../lib/api";
 import { canChoose, canTest, visibleGroups, type Proxy } from "../lib/nodes";
 
 const modes: Record<string, string> = { rule: "规则模式", global: "全局模式", direct: "直连模式" };
 
 export default function Nodes() {
  const { t, locale } = useI18n();
+ const api = createApi(t);
  const [nodes, setNodes] = createSignal<Proxy[]>([]);
  const [mode, setMode] = createSignal("");
  const [ready, setReady] = createSignal(false);

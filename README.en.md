@@ -309,3 +309,5 @@ An operation first saves a background task for a specific version, and then a si
 ### Interface language
 
 The sidebar language selector supports Simplified Chinese and English. On first use it follows supported browser language preferences, falling back to Chinese. Manual selection is saved in a browser cookie for one year. SSR and initial hydration use Chinese; the selected language is applied after mounting. Page titles, accessible labels and date formatting follow the selected language. Backend task logs, runtime diagnostics and third-party errors remain in their original language, and operation notices already shown keep the language used when they were triggered. See the project skill [nulas-i18n](.agents/skills/nulas-i18n/SKILL.md) for localization maintenance rules, and run `cd web && pnpm test:i18n` to check translation coverage and placeholders.
+
+Run `cd web && pnpm test` for all frontend tests, including API errors and server port configuration; `pnpm typecheck` checks both source code and TypeScript tests.

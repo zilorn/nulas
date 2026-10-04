@@ -1,7 +1,7 @@
 import { useI18n } from "../lib/i18n";
 import { createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import AppUpdates from "./AppUpdates";
-import { api } from "../lib/api";
+import { createApi } from "../lib/api";
 
 function SidebarIcon(props: { children: JSX.Element; brand?: boolean }) {
  return <svg class={props.brand ? "brand-icon" : "nav-icon"} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{props.children}</svg>;
@@ -9,6 +9,7 @@ function SidebarIcon(props: { children: JSX.Element; brand?: boolean }) {
 
 export default function Workspace(props: { page: "quick" | "profiles" | "tasks" | "nodes" | "core"; online?: boolean; children: JSX.Element }) {
  const { t, locale, setLocale } = useI18n();
+ const api = createApi(t);
  const [online, setOnline] = createSignal(false);
  createEffect(() => { if (typeof document !== "undefined") document.title = t("Nulas · {p0}", { p0: ({quick:t("快速配置"),profiles:t("配置管理"),tasks:t("后台任务"),nodes:t("节点管理"),core:t("内核管理")})[props.page] }); });
  onMount(() => {

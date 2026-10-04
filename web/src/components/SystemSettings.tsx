@@ -1,6 +1,6 @@
 import { useI18n } from "../lib/i18n";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { api, type Job } from "../lib/api";
+import { createApi, type Job } from "../lib/api";
 
 type SystemFeature = { supported: boolean; enabled: boolean; recovery?: boolean; message: string };
 type SettingsStatus = { proxy: SystemFeature; startup: SystemFeature };
@@ -9,6 +9,7 @@ type TrayStatus = { supported: boolean; enabled: boolean; running: boolean; mess
 type Preferences = { tray: boolean; proxy?: boolean; tun?: boolean; startup?: boolean };
 export default function SystemSettings() {
  const { t, locale } = useI18n();
+ const api = createApi(t);
  const [tray, setTray] = createSignal<TrayStatus>();
  const [preferences, setPreferences] = createSignal<Preferences>();
  const [trayDetails, setTrayDetails] = createSignal(false);

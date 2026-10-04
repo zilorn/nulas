@@ -1,12 +1,13 @@
 import { useI18n } from "../lib/i18n";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
-import { api, type Config, type Job } from "../lib/api";
+import { createApi, type Config, type Job } from "../lib/api";
 import SystemSettings from "../components/SystemSettings";
 import Workspace from "../components/Workspace";
 import ConfigurationManager from "../components/ConfigurationManager";
 export default function Home() {
  const { t } = useI18n();
+ const api = createApi(t);
  const [searchParams, setSearchParams] = useSearchParams();
  const view = () => searchParams.view === "profiles" ? "profiles" : "quick";
  const [config,setConfig] = createSignal<Config>({"mixed-port":7890,mode:"rule","allow-lan":false,ipv6:false,"log-level":"info"});
