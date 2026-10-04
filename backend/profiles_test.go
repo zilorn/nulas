@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -379,5 +380,100 @@ func TestNetworkImportRequestsClashRepresentation(t *testing.T) {
 		if err != nil || c.Mode != "direct" || c.Port != 8888 {
 			t.Fatalf("%s: %+v %v", path, c, err)
 		}
+	}
+}
+
+// Count actual reads so unknown-length requests cannot bypass the bound.
+type countedProfileBody struct {
+	io.Reader
+	bytesRead int
+}
+
+func (r *countedProfileBody) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	r.bytesRead += n
+	return n, err
+}
+
+func TestProfileRequestBodyLimit(t *testing.T) {
+	small := `{"name":"Bounded","content":"mode: rule"}`
+	for _, tc := range []struct {
+		name   string
+		body   string
+		status int
+	}{
+		{"exact boundary", small + strings.Repeat(" ", profileImportLimit-len(small)), 201},
+		{"trailing whitespace", small + strings.Repeat(" ", profileImportLimit+1-len(small)), 413},
+		{"large content", `{"name":"Bounded","content":"` + strings.Repeat("x", 52<<20) + `"}`, 413},
+		{"second object", small + " {}", 400},
+		{"malformed", `{"name":`, 400},
+		{"unknown field", `{"unexpected":true}`, 400},
+	} {
+		for _, knownLength := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/known-length=%t", tc.name, knownLength), func(t *testing.T) {
+				a := testApp(t, "")
+				reader := &countedProfileBody{Reader: strings.NewReader(tc.body)}
+				r := httptest.NewRequest("POST", "http://localhost:4669/api/profiles", reader)
+				r.Header.Set("Content-Type", "application/json")
+				if knownLength {
+					r.ContentLength = int64(len(tc.body))
+				} else {
+					r.ContentLength = -1
+					r.TransferEncoding = []string{"chunked"}
+				}
+				w := httptest.NewRecorder()
+				a.handler(4669, 4589).ServeHTTP(w, r)
+				if w.Code != tc.status {
+					t.Fatalf("status %d: %s", w.Code, w.Body.String())
+				}
+				if reader.bytesRead > profileImportLimit+1 {
+					t.Fatalf("read %d bytes past request limit", reader.bytesRead)
+				}
+				if tc.status == 413 && !strings.Contains(w.Body.String(), "16 MiB") {
+					t.Fatalf("missing size diagnostic: %s", w.Body.String())
+				}
+				if tc.status != 201 && (len(a.state.Profiles) != 0 || len(a.state.Jobs) != 0) {
+					t.Fatal("rejected request changed state")
+				}
+			})
+		}
+	}
+}
+
+func TestNetworkProfileDownloadLimit(t *testing.T) {
+	prefix := "mode: rule\n#"
+	for _, size := range []int{profileImportLimit, profileImportLimit + 1} {
+		content := prefix + strings.Repeat("x", size-len(prefix))
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/chunked" {
+				w.(http.Flusher).Flush()
+			} else {
+				w.Header().Set("Content-Length", fmt.Sprint(len(content)))
+			}
+			io.WriteString(w, content)
+		}))
+		for _, path := range []string{"/regular", "/chunked"} {
+			t.Run(fmt.Sprintf("size=%d%s", size, path), func(t *testing.T) {
+				a := testApp(t, "")
+				body, err := json.Marshal(map[string]string{"name": "Bounded", "url": server.URL + path})
+				if err != nil {
+					t.Fatal(err)
+				}
+				w := request(a, "POST", "/api/profiles", string(body))
+				if size == profileImportLimit {
+					if w.Code != 201 {
+						t.Fatalf("boundary import: %d %s", w.Code, w.Body.String())
+					}
+				} else {
+					if w.Code != 400 || !strings.Contains(w.Body.String(), "16 MiB") {
+						t.Fatalf("oversized download: %d %s", w.Code, w.Body.String())
+					}
+					if len(a.state.Profiles) != 0 || len(a.state.Jobs) != 0 {
+						t.Fatal("rejected download changed state")
+					}
+				}
+			})
+		}
+		server.Close()
 	}
 }

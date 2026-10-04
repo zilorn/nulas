@@ -17,7 +17,12 @@ import (
 	"unicode/utf8"
 )
 
-const networkImportTimeout = 15 * time.Second
+const (
+	networkImportTimeout = 15 * time.Second
+	profileImportLimit   = 16 << 20 // Bytes, including JSON encoding for API requests.
+)
+
+var errProfileDownloadTooLarge = errors.New("配置下载内容超过 16 MiB 上限")
 
 type Profile struct {
 	ID                  string     `json:"id"`
@@ -273,9 +278,12 @@ func fetchImportConfig(ctx context.Context, raw string) (importedConfig, error) 
 	if response.StatusCode != http.StatusOK {
 		return importedConfig{}, fmt.Errorf("配置下载失败：HTTP %d", response.StatusCode)
 	}
-	content, err := io.ReadAll(response.Body)
+	content, err := io.ReadAll(io.LimitReader(response.Body, profileImportLimit+1))
 	if err != nil {
 		return importedConfig{}, errors.New("配置下载未完成，请重试")
+	}
+	if len(content) > profileImportLimit {
+		return importedConfig{}, errProfileDownloadTooLarge
 	}
 	imported, err := importProfileConfig(string(content))
 	if err != nil {
@@ -306,7 +314,12 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 			URL                 *string `json:"url"`
 			UpdateIntervalHours int     `json:"updateIntervalHours"`
 		}
-		if err := decodeJSON(r.Body, &body); err != nil {
+		if err := decodeLimit(w, r, &body, profileImportLimit); err != nil {
+			var sizeError *http.MaxBytesError
+			if errors.As(err, &sizeError) {
+				fail(w, http.StatusRequestEntityTooLarge, errors.New("配置导入请求体超过 16 MiB 上限（含 JSON 编码）"))
+				return
+			}
 			fail(w, 400, err)
 			return
 		}

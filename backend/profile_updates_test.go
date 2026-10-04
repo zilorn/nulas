@@ -241,3 +241,32 @@ func TestWorkerRefreshesScheduledProfiles(t *testing.T) {
 		}
 	}
 }
+
+func TestOversizedProfileRefreshKeepsSavedConfiguration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.(http.Flusher).Flush()
+		fmt.Fprint(w, "mode: global\n#", strings.Repeat("x", profileImportLimit))
+	}))
+	defer server.Close()
+	a := testApp(t, "")
+	// An existing profile remains usable even if its next download is oversized.
+	a.state.Profiles = []Profile{{ID: "bounded", Name: "Bounded", Source: "network", RefreshURL: server.URL, Config: Config{7890, "direct", false, false, "info"}}}
+	original := a.state.Profiles[0]
+	if w := request(a, "POST", "/api/profiles/bounded/refresh", "{}"); w.Code != 202 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if !a.process() {
+		t.Fatal("refresh was not processed")
+	}
+	updated := a.state.Profiles[0]
+	if updated.Config != original.Config || updated.Document != original.Document || updated.RefreshStatus != "failed" || a.state.Jobs[0].Status != "failed" || !strings.Contains(updated.RefreshMessage, "16 MiB") {
+		t.Fatalf("oversized refresh: profile=%+v job=%+v", updated, a.state.Jobs[0])
+	}
+	b, err := newApp(a.dir, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.state.Profiles[0].Config != original.Config || b.state.Profiles[0].RefreshStatus != "failed" {
+		t.Fatal("refresh failure was not persisted")
+	}
+}

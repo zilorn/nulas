@@ -191,7 +191,11 @@ func fail(w http.ResponseWriter, status int, err error) {
 	reply(w, status, map[string]string{"error": err.Error()})
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	return decodeJSON(http.MaxBytesReader(w, r.Body, 8192), v)
+	return decodeLimit(w, r, v, 8192)
+}
+
+func decodeLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) error {
+	return decodeJSON(http.MaxBytesReader(w, r.Body, limit), v)
 }
 
 func decodeJSON(reader io.Reader, v any) error {
@@ -200,7 +204,10 @@ func decodeJSON(reader io.Reader, v any) error {
 	if e := d.Decode(v); e != nil {
 		return e
 	}
-	if d.Decode(&struct{}{}) != io.EOF {
+	if err := d.Decode(&struct{}{}); err != io.EOF {
+		if err != nil {
+			return err
+		}
 		return errors.New("expected one JSON object")
 	}
 	return nil
@@ -490,7 +497,9 @@ func (a *App) process() bool {
 	var err error
 	if j.Action == "refresh-profile" {
 		imported, err = fetchImportConfig(context.Background(), j.RefreshURL)
-		if err != nil {
+		if errors.Is(err, errProfileDownloadTooLarge) {
+			err = errors.New("配置更新失败：下载内容超过 16 MiB 上限；已保留原配置")
+		} else if err != nil {
 			err = errors.New("配置更新失败：下载或校验未通过，请检查更新地址与网络；已保留原配置")
 		}
 	} else {
