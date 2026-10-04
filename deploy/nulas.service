@@ -12,6 +12,9 @@ ExecStart=/opt/nulas/bin/nulas
 Environment=NULAS_SSR_URL=http://127.0.0.1:3001
 Environment=NULAS_ADDR=127.0.0.1:8080
 Environment=NULAS_DATA_DIR=/var/lib/nulas
+Environment=NULAS_CORE_DIR=/var/lib/nulas/core
+Environment=NULAS_CORE_INSTALLER=/opt/nulas/scripts/install_core.py
+Environment=NULAS_TRAY_SCRIPT=/opt/nulas/scripts/tray.py
 EnvironmentFile=-/etc/nulas.env
 StateDirectory=nulas
 StateDirectoryMode=0700

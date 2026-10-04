@@ -200,7 +200,9 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 
 ### 系统级部署（可选）
 
-`deploy/nulas.service` 与 `deploy/nulas-web.service` 提供 Linux systemd 后端与 SSR 服务模板，需自行安装、不会修改现有系统服务：先构建，把二进制放到 `/opt/nulas/bin/nulas`、整个 `web/.output/` 放到 `/opt/nulas/web/.output/`，安装 Node.js 24+，创建专用 `nulas` 用户并配置权限受限的 `/etc/nulas.env`。
+`deploy/nulas.service` 与 `deploy/nulas-web.service` 提供 Linux systemd 后端与 SSR 服务模板，需自行安装、不会修改现有系统服务：先构建，把二进制放到 `/opt/nulas/bin/nulas`、整个 `web/.output/` 放到 `/opt/nulas/web/.output/`、整个 `scripts/` 放到 `/opt/nulas/scripts/`，安装 Node.js 24+ 与 Python 3，创建专用 `nulas` 用户并配置权限受限的 `/etc/nulas.env`。
+
+后端模板显式设置 `NULAS_CORE_DIR=/var/lib/nulas/core`、`NULAS_CORE_INSTALLER=/opt/nulas/scripts/install_core.py` 与 `NULAS_TRAY_SCRIPT=/opt/nulas/scripts/tray.py`，不依赖开发环境的相对路径。systemd 的 `StateDirectory=nulas` 创建由服务用户拥有的 `/var/lib/nulas`，状态、托管内核及其版本下载均保存在该可写目录内；`ProtectSystem=strict` 保持安装目录只读。未设置 `MIHOMO_CONTROLLER` 时，服务使用托管内核，首次启动需要联网下载官方内核。`/etc/nulas.env` 可覆盖模板的环境变量；覆盖内核目录时须确保它在服务沙箱中可写。系统级服务没有用户桌面会话，不能显示托盘或控制 GNOME 系统代理；需要这些功能时使用桌面会话中的用户级服务。
 
 生产环境以 Go 作为统一入口：`/api/*` 由 Go 处理，页面、客户端资源与框架请求转发到本机 Node SSR 服务，无需 Nginx；SSR 不可用时页面返回明确的 502，API 仍然可用。Go 任务 worker 与 Node 独立运行，SSR 停止不会取消后台任务。
 
