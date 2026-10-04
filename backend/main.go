@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -466,7 +465,7 @@ func (a *App) runJob(j Job) error {
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("Mihomo rejected configuration (HTTP %d)", res.StatusCode)
+		return configurationRejection(res.StatusCode, res.Body, secret, j.Document)
 	}
 	return nil
 }
