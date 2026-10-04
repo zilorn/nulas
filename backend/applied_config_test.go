@@ -115,7 +115,7 @@ rules: [MATCH,DIRECT]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fields["allow-lan"] != true || fields["bind-address"] != "*" || fields["external-controller"] != "127.0.0.1:9090" || fields["secret"] != "new-secret" {
+	if fields["allow-lan"] != true || fields["bind-address"] != "*" || fields["external-controller"] != "127.0.0.1:0" || fields["secret"] != "new-secret" {
 		t.Fatal("incorrect startup listener or controller")
 	}
 	if fields["tun"].(map[string]any)["enable"] != false || fields["iptables"].(map[string]any)["enable"] != false {
@@ -214,7 +214,7 @@ func TestLANApplyAndRestart(t *testing.T) {
 				if lan {
 					wantBind = "*"
 				}
-				if fields["allow-lan"] != lan || fields["bind-address"] != wantBind || fields["external-controller"] != "127.0.0.1:9090" || fields["secret"] != "fresh" {
+				if fields["allow-lan"] != lan || fields["bind-address"] != wantBind || fields["external-controller"] != "127.0.0.1:0" || fields["secret"] != "fresh" {
 					t.Fatal("startup did not restore proxy choice with private controller")
 				}
 			}
@@ -222,5 +222,15 @@ func TestLANApplyAndRestart(t *testing.T) {
 				t.Fatalf("expected two applications, got %d", calls)
 			}
 		})
+	}
+}
+
+func TestManagedStartupAllowsFormerControllerPort(t *testing.T) {
+	a := testApp(t, "")
+	a.state.Config.Port = 9090
+	a.state.Applied = &AppliedConfig{Profile: Profile{Config: a.state.Config, Full: true, Document: "mixed-port: 9090\nrules: [MATCH,DIRECT]\n"}, JobID: "saved"}
+	fields, err := a.managedStartupConfig(a.state.Config, "fresh")
+	if err != nil || fields["mixed-port"] != 9090 || fields["external-controller"] != "127.0.0.1:0" {
+		t.Fatalf("former fixed controller port still reserved: %v, %v", fields, err)
 	}
 }

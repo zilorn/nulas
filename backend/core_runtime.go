@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -34,20 +37,12 @@ func (a *App) startCore(c Config) error {
 	}
 	a.coreRuntime = CoreStatus{"starting", "正在启动内核…"}
 	failStart := func(err error) error { a.coreRuntime = CoreStatus{"failed", err.Error()}; return err }
-	// Do not connect to or terminate another process occupying the controller port.
-	listener, err := net.Listen("tcp", "127.0.0.1:9090")
-	if err != nil {
-		return failStart(fmt.Errorf("内核控制端口 9090 不可用：%w", err))
-	}
-	listener.Close()
+	// The child binds port zero itself; never reserve and release a controller port.
 	proxyListener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", c.Port))
 	if err != nil {
 		return failStart(fmt.Errorf("内核代理端口 %d 不可用：%w", c.Port, err))
 	}
 	proxyListener.Close()
-	if c.Port == 9090 {
-		return failStart(errors.New("代理端口不能与内核控制端口 9090 相同"))
-	}
 	key := make([]byte, 32)
 	if _, err = rand.Read(key); err != nil {
 		return failStart(err)
@@ -65,6 +60,8 @@ func (a *App) startCore(c Config) error {
 	if err != nil {
 		return failStart(err)
 	}
+	// The controller address is announced at info level, including for saved silent configs.
+	config["log-level"] = "info"
 	data, err := json.Marshal(config)
 	if err != nil {
 		return failStart(err)
@@ -111,23 +108,41 @@ func (a *App) startCore(c Config) error {
 	}()
 	// Release the lock while probing readiness, allowing status requests and process exit.
 	a.mu.Unlock()
-	client := &http.Client{Timeout: 500 * time.Millisecond}
+	client := &http.Client{Timeout: 500 * time.Millisecond, Transport: &http.Transport{Proxy: nil},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	defer client.CloseIdleConnections()
+	controller := ""
 	deadline := time.Now().Add(15 * time.Second)
 	ready := false
 	for time.Now().Before(deadline) {
-		req, _ := http.NewRequestWithContext(a.managedContext, "GET", "http://127.0.0.1:9090/version", nil)
-		req.Header.Set("Authorization", "Bearer "+secret)
-		response, probeErr := client.Do(req)
-		if probeErr == nil {
-			var version struct {
-				Version string `json:"version"`
+		controller = output.Controller()
+		if controller != "" {
+			req, _ := http.NewRequestWithContext(a.managedContext, "GET", controller+"/version", nil)
+			req.Header.Set("Authorization", "Bearer "+secret)
+			response, probeErr := client.Do(req)
+			if probeErr == nil {
+				var version struct {
+					Version string `json:"version"`
+				}
+				decodeErr := json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&version)
+				response.Body.Close()
+				ready = response.StatusCode == 200 && decodeErr == nil && version.Version != ""
 			}
-			decodeErr := json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&version)
-			response.Body.Close()
-			ready = response.StatusCode == 200 && decodeErr == nil && version.Version != ""
-		}
-		if ready {
-			break
+			if ready {
+				// Restore the saved logging preference before reporting a successful startup.
+				body, _ := json.Marshal(map[string]string{"log-level": c.Log})
+				req, _ := http.NewRequestWithContext(a.managedContext, "PATCH", controller+"/configs", bytes.NewReader(body))
+				req.Header.Set("Authorization", "Bearer "+secret)
+				req.Header.Set("Content-Type", "application/json")
+				response, err := client.Do(req)
+				ready = err == nil && response.StatusCode >= 200 && response.StatusCode < 300
+				if err == nil {
+					response.Body.Close()
+				}
+				if ready {
+					break
+				}
+			}
 		}
 		select {
 		case <-done:
@@ -143,8 +158,8 @@ func (a *App) startCore(c Config) error {
 		}
 	}
 	a.mu.Lock()
-	if ready && a.coreCommand == cmd {
-		a.controller, a.secret = "http://127.0.0.1:9090", secret
+	if ready && a.coreCommand == cmd && a.managedContext.Err() == nil {
+		a.controller, a.secret = controller, secret
 		a.coreRuntime = CoreStatus{"running", "内核运行中，控制接口已连接（基础配置仅直连）。"}
 		if a.state.Applied != nil {
 			a.coreRuntime.Message = "内核运行中，已加载保存的应用配置：" + a.state.Applied.Name
@@ -161,13 +176,39 @@ func (a *App) startCore(c Config) error {
 }
 
 type coreOutput struct {
-	mu     sync.Mutex
-	buffer limitedOutput
+	mu         sync.Mutex
+	buffer     limitedOutput
+	line       []byte
+	controller string
 }
 
 func (o *coreOutput) Write(p []byte) (int, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	// Parse separately from the bounded diagnostic buffer: the announcement can
+	// arrive after verbose startup output or across multiple pipe writes.
+	for _, b := range p {
+		if b == '\n' {
+			if match := controllerAnnouncement.FindSubmatch(o.line); len(match) == 2 {
+				port, err := strconv.Atoi(string(match[1]))
+				if err == nil && port > 0 && port <= 65535 {
+					o.controller = "http://127.0.0.1:" + strconv.Itoa(port)
+				}
+			}
+			o.line = o.line[:0]
+		} else if len(o.line) < 8192 {
+			o.line = append(o.line, b)
+		}
+	}
 	return o.buffer.Write(p)
 }
 func (o *coreOutput) String() string { o.mu.Lock(); defer o.mu.Unlock(); return string(o.buffer.data) }
+
+// Only accept the managed child's plain TCP loopback controller announcement.
+var controllerAnnouncement = regexp.MustCompile(`RESTful API listening at: 127\.0\.0\.1:([0-9]+)(?:["\s]|$)`)
+
+func (o *coreOutput) Controller() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.controller
+}

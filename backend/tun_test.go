@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -16,6 +18,7 @@ func TestTUNExternalControllerIsUntouched(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(500) }))
 	defer server.Close()
 	a := testApp(t, server.URL)
+	mockTUNHost(a, false, false)
 	status := request(a, "GET", "/api/runtime/tun", "")
 	if status.Code != 200 || !strings.Contains(status.Body.String(), `"supported":false`) {
 		t.Fatal(status.Body.String())
@@ -88,6 +91,7 @@ func TestTUNDisableOnlyPatchesTUNAndVerifies(t *testing.T) {
 	}))
 	defer server.Close()
 	a := testApp(t, server.URL)
+	mockTUNHost(a, false, false)
 	a.managedContext = context.Background()
 	if err := a.setTUN(false); err != nil {
 		t.Fatal(err)
@@ -104,6 +108,7 @@ func TestTUNDoesNotTrustControllerEnableFlag(t *testing.T) {
 	for _, body := range []string{`{}`, `{"tun":{"enable":true,"device":"nulas-missing"}}`, `{"tun":{"enable":true,"device":"lo"}}`} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(body)) }))
 		a := testApp(t, server.URL)
+		mockTUNHost(a, false, false)
 		a.managedContext = context.Background()
 		if _, err := a.tunStatus(context.Background()); err == nil {
 			t.Errorf("unverified status accepted: %s", body)
@@ -147,6 +152,7 @@ func TestTUNFailedListenerCreationRollsBack(t *testing.T) {
 	}))
 	defer server.Close()
 	a := testApp(t, server.URL)
+	mockTUNHost(a, false, false)
 	a.managedContext = context.Background()
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -165,5 +171,45 @@ func TestTUNRejectsProfileSnapshot(t *testing.T) {
 		if w.Code != 400 || len(a.state.Jobs) != 0 {
 			t.Fatal("TUN operation accepted a profile document")
 		}
+	}
+}
+
+func mockTUNHost(a *App, up, device bool) {
+	a.tunInterface = func(name string) (*net.Interface, error) {
+		if !up {
+			return nil, errors.New("test: interface absent")
+		}
+		return &net.Interface{Name: name, Flags: net.FlagUp}, nil
+	}
+	a.tunDeviceExists = func(string) bool { return device }
+}
+
+func TestTUNObservedHostStates(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux managed core")
+	}
+	for _, tc := range []struct {
+		name                                        string
+		enabled, up, device, wantEnabled, wantError bool
+	}{
+		{name: "disabled and absent"},
+		{name: "disabled but still up", up: true, device: true, wantError: true},
+		{name: "enabled but absent", enabled: true, wantError: true},
+		{name: "enabled ordinary interface", enabled: true, up: true, wantError: true},
+		{name: "enabled verified TUN", enabled: true, up: true, device: true, wantEnabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"tun": map[string]any{"enable": tc.enabled, "device": tunDevice}})
+			}))
+			defer server.Close()
+			a := testApp(t, server.URL)
+			a.managedContext = context.Background()
+			mockTUNHost(a, tc.up, tc.device)
+			s, err := a.tunStatus(context.Background())
+			if (err != nil) != tc.wantError || s.Enabled != tc.wantEnabled {
+				t.Fatalf("status=%+v err=%v", s, err)
+			}
+		})
 	}
 }

@@ -105,14 +105,14 @@ func (a *App) tunStatus(ctx context.Context) (TUNStatus, error) {
 		return s, errors.New("内核未返回 TUN 状态")
 	}
 	if !config.TUN.Enable && config.TUN.Device != "" {
-		if iface, err := net.InterfaceByName(config.TUN.Device); err == nil && iface.Flags&net.FlagUp != 0 {
+		if iface, err := a.lookupTUNInterface(config.TUN.Device); err == nil && iface.Flags&net.FlagUp != 0 {
 			return s, errors.New("TUN 配置已关闭，但网卡仍在运行，请检查内核日志")
 		}
 	}
 	if config.TUN.Enable {
-		iface, err := net.InterfaceByName(config.TUN.Device)
-		_, deviceErr := os.Stat(filepath.Join("/sys/class/net", tunDevice, "tun_flags"))
-		if config.TUN.Device != tunDevice || deviceErr != nil || err != nil || iface.Flags&net.FlagUp == 0 {
+		iface, err := a.lookupTUNInterface(config.TUN.Device)
+		deviceExists := a.hasTUNDevice(tunDevice)
+		if config.TUN.Device != tunDevice || !deviceExists || err != nil || iface.Flags&net.FlagUp == 0 {
 			return s, errors.New("内核报告 TUN 已开启，但未检测到运行中的 TUN 网卡，请检查内核日志")
 		}
 		s.Enabled = true
@@ -188,4 +188,20 @@ func (a *App) applyTUN(ctx context.Context, enable bool) error {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+// Per-app probes keep runtime verification real while allowing isolated tests.
+func (a *App) lookupTUNInterface(name string) (*net.Interface, error) {
+	if a.tunInterface != nil {
+		return a.tunInterface(name)
+	}
+	return net.InterfaceByName(name)
+}
+
+func (a *App) hasTUNDevice(name string) bool {
+	if a.tunDeviceExists != nil {
+		return a.tunDeviceExists(name)
+	}
+	_, err := os.Stat(filepath.Join("/sys/class/net", name, "tun_flags"))
+	return err == nil
 }

@@ -33,7 +33,7 @@ func (a *App) managedStartupConfig(c Config, secret string) (map[string]any, err
 	if applied := a.state.Applied; applied != nil {
 		c = applied.Config
 		if applied.Document != "" {
-			if err := validateApplyPorts(applied.Document, "http://127.0.0.1:9090"); err != nil {
+			if err := validateApplyPorts(applied.Document, "http://127.0.0.1:0"); err != nil {
 				return nil, err
 			}
 			payload, err := fullApplyPayload(applied.Document, applied.JobID)
@@ -49,7 +49,7 @@ func (a *App) managedStartupConfig(c Config, secret string) (map[string]any, err
 	for key, value := range coreSettings(c) {
 		fields[key] = value
 	}
-	fields["external-controller"], fields["secret"] = "127.0.0.1:9090", secret
+	fields["external-controller"], fields["secret"] = "127.0.0.1:0", secret
 	fields["tun"] = map[string]any{"enable": false}
 	return fields, nil
 }

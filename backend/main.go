@@ -60,6 +60,8 @@ type State struct {
 	ProxyPort   int               `json:"proxyPort,omitempty"`
 }
 type App struct {
+	tunInterface                             func(string) (*net.Interface, error)
+	tunDeviceExists                          func(string) bool
 	networkRestore                           map[string]string
 	updateHome, updateScript, runningRelease string
 	updateCommand                            cliRunner
