@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -66,7 +68,35 @@ func readServerConfig() (string, map[string]json.RawMessage, map[string]int, err
 			return path, nil, nil, fmt.Errorf("%s must be between 1 and 65535", key)
 		}
 	}
+	if _, err := lanEnabled(settings); err != nil {
+		return path, nil, nil, err
+	}
 	return path, settings, ports, nil
+}
+
+func lanEnabled(settings map[string]json.RawMessage) (bool, error) {
+	value, ok := settings["lan"]
+	if !ok {
+		return false, nil
+	}
+	value = bytes.TrimSpace(value)
+	if string(value) != "true" && string(value) != "false" {
+		return false, errors.New("lan must be true or false")
+	}
+	return string(value) == "true", nil
+}
+
+// Snapshot local private interface addresses at startup; never trust arbitrary
+// private IPs or domain names supplied in a request's Host header.
+func lanInterfaceHosts(addresses []net.Addr) []string {
+	var hosts []string
+	for _, address := range addresses {
+		ip, _, err := net.ParseCIDR(address.String())
+		if err == nil && ip.IsPrivate() && !ip.IsLoopback() {
+			hosts = append(hosts, ip.String())
+		}
+	}
+	return hosts
 }
 
 func serverSSRURL() (string, error) {
@@ -84,28 +114,39 @@ func serverAddress() (string, error) {
 	if addr := os.Getenv("NULAS_ADDR"); addr != "" {
 		return addr, nil
 	}
-	_, _, ports, err := readServerConfig()
+	_, settings, ports, err := readServerConfig()
 	if err != nil {
 		return "", err
 	}
-	return "127.0.0.1:" + strconv.Itoa(ports["port"]), nil
+	host := "127.0.0.1"
+	if enabled, _ := lanEnabled(settings); enabled {
+		host = "0.0.0.0"
+	}
+	return host + ":" + strconv.Itoa(ports["port"]), nil
 }
 
 func runPortConfig(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || (len(args) == 1 && args[0] == "--json") {
-		_, _, ports, err := readServerConfig()
+		_, settings, ports, err := readServerConfig()
 		if err != nil {
 			return cliExit(err, stderr)
 		}
 		if len(args) == 1 {
-			return cliExit(json.NewEncoder(stdout).Encode(ports), stderr)
+			values := make(map[string]any)
+			for key, port := range ports {
+				values[key] = port
+			}
+			values["lan"], _ = lanEnabled(settings)
+			return cliExit(json.NewEncoder(stdout).Encode(values), stderr)
 		}
 		for _, key := range portKeys {
 			fmt.Fprintf(stdout, "%s: %d\n", key, ports[key])
 		}
+		enabled, _ := lanEnabled(settings)
+		fmt.Fprintf(stdout, "lan: %t\n", enabled)
 		return 0
 	}
-	valid := false
+	valid := args[0] == "lan"
 	for _, key := range portKeys {
 		valid = valid || args[0] == key
 	}
@@ -115,7 +156,12 @@ func runPortConfig(args []string, stdout, stderr io.Writer) int {
 	}
 	key := args[0]
 	port := 0
-	if len(args) == 2 {
+	if len(args) == 2 && key == "lan" {
+		if args[1] != "true" && args[1] != "false" {
+			return cliExit(errors.New("lan must be true or false"), stderr)
+		}
+	}
+	if len(args) == 2 && key != "lan" {
 		// Accept decimal digits only, including no signs or whitespace.
 		for _, c := range args[1] {
 			if c < '0' || c > '9' {
@@ -133,10 +179,19 @@ func runPortConfig(args []string, stdout, stderr io.Writer) int {
 		return cliExit(err, stderr)
 	}
 	if len(args) == 1 {
-		fmt.Fprintln(stdout, saved[key])
+		if key == "lan" {
+			enabled, _ := lanEnabled(settings)
+			fmt.Fprintln(stdout, enabled)
+		} else {
+			fmt.Fprintln(stdout, saved[key])
+		}
 		return 0
 	}
-	settings[key] = json.RawMessage(strconv.Itoa(port))
+	value := strconv.Itoa(port)
+	if key == "lan" {
+		value = args[1]
+	}
+	settings[key] = json.RawMessage(value)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return cliExit(err, stderr)
@@ -147,9 +202,12 @@ func runPortConfig(args []string, stdout, stderr io.Writer) int {
 	if err = atomicWrite(path, append(data, '\n')); err != nil {
 		return cliExit(err, stderr)
 	}
-	fmt.Fprintf(stdout, "Saved %s %d. Restart Nulas to apply (nulas restart for the Linux service).\n", key, port)
-	if key == "port" && os.Getenv("NULAS_ADDR") != "" {
-		fmt.Fprintln(stdout, "NULAS_ADDR overrides the saved port; remove that override to use this setting.")
+	fmt.Fprintf(stdout, "Saved %s %s. Restart Nulas to apply (nulas restart for the Linux service).\n", key, value)
+	if key == "lan" && value == "true" {
+		fmt.Fprintln(stdout, "LAN access exposes the dashboard and unauthenticated API to your network. Use only a trusted LAN; public deployment requires authentication and TLS.")
+	}
+	if (key == "port" || key == "lan") && os.Getenv("NULAS_ADDR") != "" {
+		fmt.Fprintln(stdout, "NULAS_ADDR overrides the saved listen address and port; remove that override to use this setting.")
 	}
 	if key == "ssr-port" && os.Getenv("NULAS_SSR_URL") != "" {
 		fmt.Fprintln(stdout, "NULAS_SSR_URL overrides the saved SSR port; remove that override to use this setting.")

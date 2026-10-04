@@ -123,6 +123,7 @@ The script installs locked dependencies, runs the frontend type check, builds th
 
 ### Downloading the core on demand
 
+
 When you already have a core you can connect to it directly without downloading. To download one:
 
 ```sh
@@ -168,12 +169,15 @@ nulas config port 4769         # Web pages and API
 nulas config ssr-port 4768     # Production SSR frontend
 nulas config dev-port 4689     # Development frontend
 nulas config ssr-port          # Query one entry (port / dev-port behave the same)
+nulas config lan true          # Enable LAN access (default false); use false to disable
 nulas restart                 # Restart the Linux service; restart foreground and development modes after stopping
 ```
 
 Allowed values are `1–65535`, the port must be free, and Web/API and SSR must use different ports; unprivileged users usually cannot bind ports below `1024`. `scripts/start.sh`, `nulas run`, `pnpm start` and the development server read the same configuration, and the development `/api` proxy follows the Web/API port automatically. These settings do not change Mihomo's controller or proxy ports.
 
-Ports are saved with atomic writes to `nulas/server.json` in the current user's configuration directory (Linux defaults to `~/.config/nulas/server.json` and honors `XDG_CONFIG_HOME`; macOS/Windows use the system user configuration directory), and commands run from any working directory use the same file. The CLI and the service should use the same user and configuration directory. The `port` and other fields saved in older files are preserved, and missing entries use the new defaults. `NULAS_ADDR` and `NULAS_SSR_URL` take precedence over the saved Web/API and SSR ports; if the service's `service.env` sets them, remove those overrides to use the saved values. The production launcher starts Node on the loopback address and port from `NULAS_SSR_URL`; the launcher sets `NITRO_HOST` / `NITRO_PORT` itself. `nulas config --json` lets scripts read saved values and defaults.
+Ports and the LAN switch are saved with atomic writes to `nulas/server.json` in the current user's configuration directory (Linux defaults to `~/.config/nulas/server.json` and honors `XDG_CONFIG_HOME`; macOS/Windows use the system user configuration directory), and commands run from any working directory use the same file. The CLI and the service should use the same user and configuration directory. The `port` and other fields saved in older files are preserved, and missing entries use the new defaults. `NULAS_ADDR` and `NULAS_SSR_URL` take precedence over the saved Web/API and SSR ports; if the service's `service.env` sets them, remove those overrides to use the saved values. The production launcher starts Node on the loopback address and port from `NULAS_SSR_URL`; the launcher sets `NITRO_HOST` / `NITRO_PORT` itself. `nulas config --json` lets scripts read saved values and defaults.
+
+`nulas config lan true` saves the LAN access switch. After restart, Web/API listens on `0.0.0.0`; open `http://LOCAL_LAN_IP:WEB_PORT`. `nulas config lan false` restores local access after restart. Hosts are restricted to local private IPs detected at startup and loopback addresses; LAN domain names are unsupported, and interface address changes require a restart. SSR and the development frontend still listen on loopback. `NULAS_ADDR` overrides the saved listen address and port; a loopback override keeps LAN access unavailable. Enabling this exposes the unauthenticated management API to LAN devices, so use a trusted LAN; public deployment still requires separate authentication and TLS. This switch does not change Mihomo `allow-lan`, system proxy settings or the firewall.
 
 When you already have a core, write `MIHOMO_CONTROLLER`, `MIHOMO_SECRET` and related values into `~/.config/nulas/service.env` with mode `600` before starting the service; the installer never copies credentials from the terminal environment. The page switch controls start at login and systemd persists the registration; user services without linger start only after login, so run `loginctl enable-linger` when needed (this may require host administrator authorization and the application never escalates privileges for you), or run `python3 scripts/install_service.py` directly.
 
@@ -231,7 +235,7 @@ In production Go is the single entry point: `/api/*` is handled by Go, and pages
 | `nulas remove` | Remove the quick-installed software and PATH configuration, keeping user data, cores and configuration |
 | `nulas status` | Show service status and recent logs; returns a non-zero exit code when not running |
 | `nulas start` / `stop` / `restart` | Start, stop or restart the frontend and backend |
-| `nulas config [port\|ssr-port\|dev-port] [PORT]` | Show all ports, or query / save one entry; takes effect after a restart |
+| `nulas config [port\|ssr-port\|dev-port\|lan] [VALUE]` | Show all settings, or query / save ports and LAN access; takes effect after a restart |
 | `nulas` (no arguments) | Run only the backend in the foreground |
 | `nulas --help` | Show usage |
 
@@ -252,7 +256,7 @@ Commands run from any directory, and service commands act on the current user's 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `NULAS_INSTALL_HOME` | Installation directory set by the quick installer | CLI update management; usually no manual configuration needed |
-| `NULAS_ADDR` | `127.0.0.1:4669` (or the port saved in the CLI) | Web/API listen address; an explicit value overrides the CLI port |
+| `NULAS_ADDR` | `127.0.0.1:4669` (or the port saved in the CLI) | Web/API listen address; an explicit value overrides the CLI port and LAN binding |
 | `NULAS_SSR_URL` | `http://127.0.0.1:4668` (or the SSR port saved in the CLI) | Local SSR address Go forwards page requests to (HTTP loopback IP only) |
 | `NULAS_WEB_DIR` | empty | Explicitly enables legacy static web hosting; cannot be used with SSR builds |
 | `NULAS_DATA_DIR` | `.data` (relative to the working directory) | Configuration, tasks and generated files |
@@ -281,7 +285,7 @@ macOS/Windows use the native pystray backend; Linux needs a PyGObject runtime fo
 
 ## Notes
 
-- **Local use only**: The API and SSR bind to the loopback address by default, allow request Host values only for `127.0.0.1`, `localhost` or `[::1]` with the actual API listening port or configured development port (fixed at startup), rejecting external domains used for DNS rebinding. Writes also validate same-origin Origin values, and client forwarding headers are not trusted. The API has no authentication; local processes can still call it directly. Remote deployment requires implementing authentication and TLS yourself; never put controller credentials in the frontend or commit them to the repository.
+- **Access boundaries**: Local access is the default; explicitly enabling `config lan true` additionally allows local private LAN IPs. The API and SSR bind to the loopback address by default, by default allow request Host values only for `127.0.0.1`, `localhost` or `[::1]` with the actual API listening port or configured development port (fixed at startup), rejecting external domains used for DNS rebinding. Writes also validate same-origin Origin values, and client forwarding headers are not trusted. The API has no authentication; local processes can still call it directly. Remote deployment requires implementing authentication and TLS yourself; never put controller credentials in the frontend or commit them to the repository.
 - **Do not escalate privileges**: Grant only the capabilities the Mihomo binary needs (for example `sudo setcap cap_net_admin,cap_net_raw+ep <mihomo>`), never run Nulas or Node as root, and do not use `sudo nulas`.
 - **Platform limitations**: The system proxy supports only unprivileged Linux GNOME environments with a desktop session and `gsettings`; TUN management supports only Linux managed cores started by Nulas (external controllers and other systems are not supported); start at login is Linux user-level systemd. The cross-platform tray does not change these boundaries.
 - **Preferences and observed state are separate**: Switch preferences are stored under `preferences` in `NULAS_DATA_DIR/state.json`. After startup jobs finish, saved enabled system proxy / TUN preferences are restored through newly created and durably persisted background jobs; TUN stays disabled until its restoration check passes. A previously failed or interrupted network operation requires a manual retry, queued operations keep running without duplicate restoration, and the observed state shown in the page can differ from saved preferences with failures labeled explicitly.

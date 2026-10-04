@@ -41,7 +41,9 @@ trap 'exit 143' TERM
 
 cd "$ROOT_DIR/backend"
 go build -o "$DEV_DIR/nulas" .
-web_addr="${NULAS_ADDR:-127.0.0.1:$("$DEV_DIR/nulas" config port)}"
+web_host="127.0.0.1"
+if [[ "$("$DEV_DIR/nulas" config lan)" == "true" ]]; then web_host="0.0.0.0"; fi
+web_addr="${NULAS_ADDR:-$web_host:$("$DEV_DIR/nulas" config port)}"
 dev_port="$("$DEV_DIR/nulas" config dev-port)"
 "$DEV_DIR/nulas" &
 backend_pid=$!

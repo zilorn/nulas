@@ -126,8 +126,8 @@ func TestAllPortSettingsAndLegacyConfig(t *testing.T) {
 	if code := runCLI([]string{"config", "--json"}, &out, &stderr, nil, nil); code != 0 {
 		t.Fatal(stderr.String())
 	}
-	var ports map[string]int
-	if err := json.Unmarshal(out.Bytes(), &ports); err != nil || ports["port"] != 4669 || ports["ssr-port"] != 4668 || ports["dev-port"] != 4589 {
+	var ports map[string]any
+	if err := json.Unmarshal(out.Bytes(), &ports); err != nil || ports["port"] != float64(4669) || ports["ssr-port"] != float64(4668) || ports["dev-port"] != float64(4589) {
 		t.Fatalf("defaults: %s %v", &out, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -188,6 +188,62 @@ func TestOtherPortsRejectMalformedConfig(t *testing.T) {
 			if string(got) != data {
 				t.Fatal("malformed settings overwritten")
 			}
+		}
+	}
+}
+
+func TestLANConfig(t *testing.T) {
+	path := isolatedServerConfig(t)
+	var out, stderr bytes.Buffer
+	if code := runCLI([]string{"config", "lan"}, &out, &stderr, nil, nil); code != 0 || out.String() != "false\n" {
+		t.Fatalf("default: %d %s %s", code, &out, &stderr)
+	}
+	for _, value := range []string{"true", "false"} {
+		out.Reset()
+		if code := runCLI([]string{"config", "lan", value}, &out, &stderr, nil, nil); code != 0 || !strings.Contains(out.String(), "Restart") {
+			t.Fatalf("save: %d %s %s", code, &out, &stderr)
+		}
+		want := "127.0.0.1:4669"
+		if value == "true" {
+			want = "0.0.0.0:4669"
+		}
+		if addr, err := serverAddress(); err != nil || addr != want {
+			t.Fatalf("address: %s %v", addr, err)
+		}
+		out.Reset()
+		if code := runCLI([]string{"config", "lan"}, &out, &stderr, nil, nil); code != 0 || out.String() != value+"\n" {
+			t.Fatalf("query: %d %s", code, &out)
+		}
+	}
+	before, _ := os.ReadFile(path)
+	for _, value := range []string{"1", "on", "TRUE", "", " true"} {
+		if runCLI([]string{"config", "lan", value}, &out, &stderr, nil, nil) == 0 {
+			t.Fatalf("accepted %q", value)
+		}
+		after, _ := os.ReadFile(path)
+		if !bytes.Equal(before, after) {
+			t.Fatal("invalid value changed settings")
+		}
+	}
+	t.Setenv("NULAS_ADDR", "127.0.0.1:8181")
+	out.Reset()
+	if runCLI([]string{"config", "lan", "true"}, &out, &stderr, nil, nil) != 0 || !strings.Contains(out.String(), "overrides") {
+		t.Fatal("missing override notice")
+	}
+	if addr, err := serverAddress(); err != nil || addr != "127.0.0.1:8181" {
+		t.Fatalf("override: %s %v", addr, err)
+	}
+	t.Setenv("NULAS_ADDR", "")
+	for _, value := range []string{"null", `"true"`, "1", "{}"} {
+		data := []byte(`{"lan":` + value + `}`)
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := serverAddress(); err == nil {
+			t.Fatalf("accepted malformed config %s", data)
+		}
+		if runCLI([]string{"config", "lan", "false"}, &out, &stderr, nil, nil) == 0 {
+			t.Fatal("overwrote malformed config")
 		}
 	}
 }

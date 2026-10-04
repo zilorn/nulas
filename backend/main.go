@@ -214,14 +214,14 @@ func decodeJSON(reader io.Reader, v any) error {
 	}
 	return nil
 }
-func (a *App) handler(apiPort, devPort int) http.Handler {
+func (a *App) handler(apiPort, devPort int, lanHosts ...string) http.Handler {
 	// Hosts are fixed at startup, independently of request and forwarding headers.
 	allowedHosts := make(map[string]bool)
 	for _, port := range []int{apiPort, devPort} {
 		if port < 1 || port > 65535 {
 			continue
 		}
-		for _, host := range []string{"127.0.0.1", "localhost", "::1"} {
+		for _, host := range append([]string{"127.0.0.1", "localhost", "::1"}, lanHosts...) {
 			allowedHosts[net.JoinHostPort(host, strconv.Itoa(port))] = true
 			// Browsers omit HTTP's default port in Host and Origin.
 			if port == 80 {
@@ -630,9 +630,17 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	_, _, ports, err := readServerConfig()
+	_, settings, ports, err := readServerConfig()
 	if err != nil {
 		log.Fatal(err)
+	}
+	var lanHosts []string
+	if enabled, _ := lanEnabled(settings); enabled {
+		addresses, err := net.InterfaceAddrs()
+		if err != nil {
+			log.Fatal(err)
+		}
+		lanHosts = lanInterfaceHosts(addresses)
 	}
 	a, e := newApp(env("NULAS_DATA_DIR", ".data"), os.Getenv("MIHOMO_CONTROLLER"), os.Getenv("MIHOMO_SECRET"))
 	if e != nil {
@@ -646,7 +654,15 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	a.trayContext = ctx
-	a.trayURL = "http://" + listener.Addr().String()
+	trayAddress := listener.Addr().(*net.TCPAddr)
+	trayHost := trayAddress.IP.String()
+	if trayAddress.IP.IsUnspecified() {
+		trayHost = "127.0.0.1"
+		if trayAddress.IP.To4() == nil {
+			trayHost = "::1"
+		}
+	}
+	a.trayURL = "http://" + net.JoinHostPort(trayHost, strconv.Itoa(trayAddress.Port))
 	go func() {
 		a.mu.Lock()
 		enabled := a.state.Preferences.Tray
@@ -672,7 +688,7 @@ func main() {
 	}
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); a.worker(ctx) }()
-	s := &http.Server{Addr: addr, Handler: a.handler(listener.Addr().(*net.TCPAddr).Port, ports["dev-port"]), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	s := &http.Server{Addr: addr, Handler: a.handler(listener.Addr().(*net.TCPAddr).Port, ports["dev-port"], lanHosts...), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	log.Printf("Nulas web and API listening on http://%s", listener.Addr())
 	go func() {
 		<-ctx.Done()

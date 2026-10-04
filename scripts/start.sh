@@ -23,7 +23,9 @@ fi
   echo "请先运行 scripts/build.sh。" >&2
   exit 1
 }
-web_addr="${NULAS_ADDR:-127.0.0.1:$("$ROOT_DIR/bin/nulas" config port)}"
+web_host="127.0.0.1"
+if [[ "$("$ROOT_DIR/bin/nulas" config lan)" == "true" ]]; then web_host="0.0.0.0"; fi
+web_addr="${NULAS_ADDR:-$web_host:$("$ROOT_DIR/bin/nulas" config port)}"
 ssr_host="$(node "$ROOT_DIR/web/scripts/server-config.mjs" ssr-host)"
 ssr_port="$(node "$ROOT_DIR/web/scripts/server-config.mjs" ssr-port)"
 backend_pid=""

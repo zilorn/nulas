@@ -23,10 +23,10 @@ func execCLI(ctx context.Context, stdout, stderr io.Writer, name string, args ..
 	return cmd.Run()
 }
 
-const cliUsage = `Usage: nulas [open|install|uninstall|remove|status|start|stop|restart|run|update|config [KEY [PORT]]]
+const cliUsage = `Usage: nulas [open|install|uninstall|remove|status|start|stop|restart|run|update|config [KEY [VALUE]]]
 
-  config [KEY [PORT]] Show all ports, or show/save one (1–65535; restart to apply).
-                     Keys: port (web/API), ssr-port, dev-port.
+  config [KEY [VALUE]] Show all settings, or show/save one (restart to apply).
+                     Keys: port (web/API), ssr-port, dev-port (1–65535); lan (true/false).
                      config --json prints saved/default values as JSON.
 
   open     Open the configured Web/API URL in the default browser.

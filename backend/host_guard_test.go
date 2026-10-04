@@ -107,3 +107,49 @@ func TestDefaultHTTPPortHost(t *testing.T) {
 		}
 	}
 }
+
+func TestLANHostGuard(t *testing.T) {
+	a := testApp(t, "")
+	handler := a.handler(4799, 4590, "192.168.1.10")
+	for _, tc := range []struct {
+		host, origin string
+		code         int
+	}{
+		{"192.168.1.10:4799", "http://192.168.1.10:4799", 202},
+		{"192.168.1.10:4799", "http://evil.example:4799", 403},
+		{"192.168.1.11:4799", "http://192.168.1.11:4799", 403},
+		{"192.168.1.10:4668", "http://192.168.1.10:4668", 403},
+		{"evil.example:4799", "http://evil.example:4799", 403},
+	} {
+		r := httptest.NewRequest("POST", "http://"+tc.host+"/api/jobs", strings.NewReader(`{"action":"generate"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Origin", tc.origin)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != tc.code {
+			t.Fatalf("%s / %s: %d %s", tc.host, tc.origin, w.Code, w.Body.String())
+		}
+	}
+	r := httptest.NewRequest("GET", "http://192.168.1.10:4799/api/health", nil)
+	w := httptest.NewRecorder()
+	a.handler(4799, 4590).ServeHTTP(w, r)
+	if w.Code != 403 {
+		t.Fatal("LAN accepted by default")
+	}
+}
+
+func TestLANInterfaceHosts(t *testing.T) {
+	var addresses []net.Addr
+	for _, cidr := range []string{"127.0.0.1/8", "192.168.1.10/24", "10.0.0.2/8", "172.16.0.2/16", "8.8.8.8/32", "::1/128", "fd00::1/64", "fe80::1/64"} {
+		ip, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		network.IP = ip
+		addresses = append(addresses, network)
+	}
+	got := lanInterfaceHosts(addresses)
+	if strings.Join(got, ",") != "192.168.1.10,10.0.0.2,172.16.0.2,fd00::1" {
+		t.Fatalf("hosts: %v", got)
+	}
+}

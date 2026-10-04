@@ -168,12 +168,15 @@ nulas config port 4769         # Web 页面与 API
 nulas config ssr-port 4768     # 生产 SSR 前端
 nulas config dev-port 4689     # 开发前端
 nulas config ssr-port          # 查询单项（port / dev-port 同理）
+nulas config lan true          # 开启局域网访问（默认 false）；关闭用 false
 nulas restart                 # Linux 服务重启；前台与开发模式停止后重新启动
 ```
 
 允许范围为 `1–65535`，端口必须可用，Web/API 与 SSR 必须使用不同端口；普通用户通常不能绑定低于 `1024` 的端口。`scripts/start.sh`、`nulas run`、`pnpm start` 与开发服务器会读取同一配置，开发 `/api` 代理自动跟随 Web/API 端口。这些设置不改变 Mihomo 的控制端口或代理端口。
 
-端口通过原子写入保存至当前用户配置目录的 `nulas/server.json`（Linux 默认 `~/.config/nulas/server.json`，遵循 `XDG_CONFIG_HOME`；macOS/Windows 使用系统用户配置目录），从任意工作目录执行命令均使用同一文件。CLI 与服务应使用同一用户和配置目录。旧文件中保存的 `port` 和其他字段会保留，缺少的项目使用新默认值。`NULAS_ADDR` 和 `NULAS_SSR_URL` 分别优先于保存的 Web/API 和 SSR 端口；若服务的 `service.env` 中设置了它们，请移除覆盖以使用保存值。生产启动器按 `NULAS_SSR_URL` 的回环地址和端口启动 Node；`NITRO_HOST` / `NITRO_PORT` 由启动器统一设置。`nulas config --json` 可供脚本读取保存值和默认值。
+端口和局域网开关通过原子写入保存至当前用户配置目录的 `nulas/server.json`（Linux 默认 `~/.config/nulas/server.json`，遵循 `XDG_CONFIG_HOME`；macOS/Windows 使用系统用户配置目录），从任意工作目录执行命令均使用同一文件。CLI 与服务应使用同一用户和配置目录。旧文件中保存的 `port` 和其他字段会保留，缺少的项目使用新默认值。`NULAS_ADDR` 和 `NULAS_SSR_URL` 分别优先于保存的 Web/API 和 SSR 端口；若服务的 `service.env` 中设置了它们，请移除覆盖以使用保存值。生产启动器按 `NULAS_SSR_URL` 的回环地址和端口启动 Node；`NITRO_HOST` / `NITRO_PORT` 由启动器统一设置。`nulas config --json` 可供脚本读取保存值和默认值。
+
+`nulas config lan true` 保存局域网访问开关，重启后 Web/API 监听 `0.0.0.0`，通过 `http://本机局域网IP:Web端口` 访问；`nulas config lan false` 恢复仅本机访问，同样需重启。访问地址只允许启动时检测到的本机私有 IP 和回环地址，不支持局域网域名；网卡地址变化后需重启。SSR 和开发前端仍只监听回环地址。`NULAS_ADDR` 优先于保存的监听地址与端口，设为回环地址时不会开放局域网。开启后局域网设备可访问无认证的管理 API，仅用于可信局域网；公网部署仍需另行实现认证与 TLS。此开关不修改 Mihomo 的 `allow-lan`、系统代理或防火墙。
 
 已有内核时，在启动服务前把 `MIHOMO_CONTROLLER`、`MIHOMO_SECRET` 等写入 `~/.config/nulas/service.env` 并设为权限 `600`；安装器不会复制终端环境中的凭据。开机自启由网页开关控制、注册状态由 systemd 持久保存；没有 linger 的用户服务只在登录后启动，必要时执行 `loginctl enable-linger`（可能需要主机管理员授权，应用不会代为提权），也可直接运行 `python3 scripts/install_service.py`。
 
@@ -231,7 +234,7 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 | `nulas remove` | 卸载快速安装的软件及 PATH 配置，保留用户数据、内核和配置 |
 | `nulas status` | 查看服务状态与近期日志；未运行时返回非零退出码 |
 | `nulas start` / `stop` / `restart` | 启动、停止、重启前后端 |
-| `nulas config [port\|ssr-port\|dev-port] [PORT]` | 显示全部端口，或查询 / 保存单项，重启后生效 |
+| `nulas config [port\|ssr-port\|dev-port\|lan] [VALUE]` | 显示全部设置，或查询 / 保存端口及局域网开关，重启后生效 |
 | `nulas`（无参数） | 前台只运行后端 |
 | `nulas --help` | 显示用法 |
 
@@ -252,7 +255,7 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | `NULAS_INSTALL_HOME` | 快速安装器设置的安装目录 | CLI 更新管理；通常无需手工设置 |
-| `NULAS_ADDR` | `127.0.0.1:4669`（或 CLI 保存的端口） | Web/API 监听地址，显式设置时覆盖 CLI 端口 |
+| `NULAS_ADDR` | `127.0.0.1:4669`（或 CLI 保存的端口） | Web/API 监听地址，显式设置时覆盖 CLI 端口与局域网监听设置 |
 | `NULAS_SSR_URL` | `http://127.0.0.1:4668`（或 CLI 保存的 SSR 端口） | Go 转发页面请求的本机 SSR 地址（仅支持 HTTP 回环 IP） |
 | `NULAS_WEB_DIR` | 空 | 显式启用旧版静态网页托管；不能用于 SSR 构建 |
 | `NULAS_DATA_DIR` | `.data`（相对工作目录） | 配置、任务和生成文件 |
@@ -281,7 +284,7 @@ macOS/Windows 使用 pystray 原生后端；Linux 需要 GTK/AppIndicator 的 Py
 
 ## 注意事项
 
-- **仅限本机**：API 与 SSR 默认绑定回环地址，所有请求的 Host 仅允许 `127.0.0.1`、`localhost`、`[::1]` 加实际 API 监听端口或配置的开发端口（启动时固定），拒绝 DNS rebinding 使用的外部域名；写入还会校验同源 Origin，不信任客户端转发头。API 无认证，本机进程仍可直接调用。远程部署必须自行实现认证与 TLS；不要把控制接口凭据放进前端或提交到仓库。
+- **访问边界**：默认仅限本机；显式开启 `config lan true` 后允许本机局域网私有 IP。API 与 SSR 默认绑定回环地址，默认所有请求的 Host 仅允许 `127.0.0.1`、`localhost`、`[::1]` 加实际 API 监听端口或配置的开发端口（启动时固定），拒绝 DNS rebinding 使用的外部域名；写入还会校验同源 Origin，不信任客户端转发头。API 无认证，本机进程仍可直接调用。远程部署必须自行实现认证与 TLS；不要把控制接口凭据放进前端或提交到仓库。
 - **不要提权**：只给 Mihomo 二进制授予必要能力（如 `sudo setcap cap_net_admin,cap_net_raw+ep <mihomo>`），不要以 root 运行 Nulas 或 Node，也不要使用 `sudo nulas`。
 - **平台限制**：系统代理仅支持具有桌面会话与 `gsettings` 的 Linux GNOME 普通用户环境；TUN 管理仅支持 Nulas 启动的 Linux 托管内核（外部控制器与其他系统不提供）；开机自启为 Linux 用户级 systemd。跨平台托盘不会改变这些边界。
 - **偏好与实测分离**：开关偏好保存在 `NULAS_DATA_DIR/state.json` 的 `preferences`，启动任务完成后，通过新建并持久保存的后台任务恢复已保存的系统代理 / TUN 开启偏好；TUN 在恢复检查通过前保持关闭。上次失败或被中断的网络操作需手动重试，已有排队操作继续执行，不重复恢复；页面显示的实测状态与保存偏好可能不同，失败会显式标注。
