@@ -14,6 +14,76 @@ import (
 	"time"
 )
 
+// Minimal managed core: answers readiness on a random loopback controller and
+// accepts the log-level restore patch. Enough to exercise restarts.
+const restartableFakeCore = `#!/usr/bin/env python3
+import json,sys,http.server
+config=json.load(open(sys.argv[sys.argv.index('-f')+1]))
+class H(http.server.BaseHTTPRequestHandler):
+ def do_GET(self):
+  self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(b'{"version":"test"}')
+ def do_PATCH(self):
+  self.rfile.read(int(self.headers['Content-Length']));self.send_response(204);self.end_headers()
+ def log_message(self,*a): pass
+host,port=config['external-controller'].rsplit(':',1)
+s=http.server.HTTPServer((host,int(port)),H)
+print('RESTful API listening at: '+host+':'+str(s.server_port),flush=True)
+s.serve_forever()
+`
+
+func TestManagedCoreRestartReplacesUnresponsiveCore(t *testing.T) {
+	isolatedCore(t)
+	a := testApp(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.managedContext = ctx
+	a.state.Config.Port = 0
+	a.state.Config.Log = "silent"
+	if err := os.MkdirAll(filepath.Dir(corePath()), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(corePath(), []byte(restartableFakeCore), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.startCore(a.state.Config); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	first := a.coreCommand
+	a.mu.Unlock()
+	if first == nil {
+		t.Fatal("core did not start")
+	}
+	// The process lives on but its controller no longer answers.
+	a.mu.Lock()
+	a.controller, a.secret = "http://127.0.0.1:1", "stale"
+	a.mu.Unlock()
+	if err := a.startCore(a.state.Config); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	status, second, controller := a.coreStatus(), a.coreCommand, a.controller
+	a.mu.Unlock()
+	if second == nil || second == first || controller == "http://127.0.0.1:1" || status.Status != "running" {
+		t.Fatalf("unresponsive core not replaced: %+v", status)
+	}
+}
+
+func TestApplyReportsUnresponsiveManagedCore(t *testing.T) {
+	a := testApp(t, "http://127.0.0.1:1")
+	a.managedContext = context.Background()
+	err := a.runJob(Job{ID: "test", Action: "apply", Config: a.state.Config})
+	if err == nil || !strings.Contains(err.Error(), "控制接口") {
+		t.Fatalf("unclear controller failure: %v", err)
+	}
+	a.mu.Lock()
+	status := a.coreRuntime.Status
+	a.mu.Unlock()
+	if status != "failed" {
+		t.Fatal("stale running status after controller failure")
+	}
+}
+
 func TestManagedCoreLifecycle(t *testing.T) {
 	isolatedCore(t)
 	a := testApp(t, "")

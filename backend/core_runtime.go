@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -21,6 +22,12 @@ import (
 
 // Only the production entry point enables ownership; external controllers are untouched.
 func (a *App) startCore(c Config) error {
+	// An existing process that no longer answers its controller is not a running
+	// core. Replace it before reporting a verified start; otherwise a restart
+	// request would silently succeed while the controller stays unusable.
+	if err := a.restartUnresponsiveCore(); err != nil {
+		return err
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.managedContext == nil {
@@ -184,6 +191,72 @@ func (a *App) startCore(c Config) error {
 	<-done
 	a.mu.Lock()
 	return failStart(errors.New("内核未能启动并通过控制接口检查；" + output.String()))
+}
+
+const controllerProbeTimeout = 3 * time.Second
+
+// Caller must not hold a.mu.
+func (a *App) restartUnresponsiveCore() error {
+	a.mu.Lock()
+	if a.managedContext == nil || a.coreCommand == nil || a.managedContext.Err() != nil {
+		a.mu.Unlock()
+		return nil
+	}
+	controller, secret := a.controller, a.secret
+	a.mu.Unlock()
+	// An empty controller means the child has not announced itself yet; leave a
+	// start in progress alone.
+	if controller == "" || a.controllerAlive(controller, secret) {
+		return nil
+	}
+	return a.stopManagedCore()
+}
+
+// controllerAlive uses fresh state for each probe and never consults proxy
+// environment variables, keeping loopback discovery local.
+func (a *App) controllerAlive(controller, secret string) bool {
+	parent := a.managedContext
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, controllerProbeTimeout)
+	defer cancel()
+	client := &http.Client{Timeout: controllerProbeTimeout, Transport: &http.Transport{Proxy: nil},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	defer client.CloseIdleConnections()
+	req, err := http.NewRequestWithContext(ctx, "GET", controller+"/version", nil)
+	if err != nil {
+		return false
+	}
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+	response, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+	response.Body.Close()
+	return response.StatusCode == 200
+}
+
+// A failed controller request must not leave a stale "running" status. When a
+// managed core stops answering, report it so the interface offers an explicit
+// restart instead of an opaque transport error.
+func (a *App) controllerUnavailable(controller, secret string) error {
+	const message = "Mihomo 控制接口无响应，请在内核管理页重试安装 / 启动后再应用配置"
+	if a.managedContext == nil || controller == "" {
+		return errors.New("Mihomo 控制接口不可用，请检查内核连接")
+	}
+	a.mu.Lock()
+	healthy := a.coreRuntime.Status != "failed"
+	a.mu.Unlock()
+	if healthy && !a.controllerAlive(controller, secret) {
+		a.mu.Lock()
+		a.coreRuntime = CoreStatus{"failed", message}
+		a.mu.Unlock()
+	}
+	return errors.New(message)
 }
 
 type coreOutput struct {

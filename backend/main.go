@@ -436,6 +436,9 @@ func (a *App) runJob(j Job) error {
 	a.mu.Lock()
 	controller, secret := a.controller, a.secret
 	a.mu.Unlock()
+	if controller == "" {
+		return errors.New("尚未连接 Mihomo 控制接口，请先启动内核")
+	}
 	method, endpoint := http.MethodPatch, controller+"/configs"
 	if j.Document != "" {
 		if e = validateApplyPorts(j.Document, controller); e != nil {
@@ -464,7 +467,7 @@ func (a *App) runJob(j Job) error {
 	}
 	res, e := a.client.Do(req)
 	if e != nil {
-		return errors.New("Mihomo controller unavailable")
+		return a.controllerUnavailable(controller, secret)
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
