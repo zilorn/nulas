@@ -443,4 +443,42 @@ func (a *App) profileRoutes(mux *http.ServeMux) {
 		}
 		fail(w, 404, errors.New("配置不存在"))
 	})
+	// Deleting a library entry never touches the applied snapshot, current
+	// config or job history. A queued refresh would write its result back to a
+	// missing profile, so it must finish first.
+	mux.HandleFunc("DELETE /api/profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var body struct{}
+		if err := decode(w, r, &body); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		index := -1
+		for i, p := range a.state.Profiles {
+			if p.ID == r.PathValue("id") {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			fail(w, 404, errors.New("配置不存在"))
+			return
+		}
+		for _, j := range a.state.Jobs {
+			if j.ProfileID == a.state.Profiles[index].ID && (j.Status == "queued" || j.Status == "running") {
+				fail(w, 409, errors.New("该配置有正在进行的后台任务，请等待完成后再删除"))
+				return
+			}
+		}
+		old := a.state.Profiles
+		removed := old[index]
+		a.state.Profiles = append(append([]Profile(nil), old[:index]...), old[index+1:]...)
+		if err := a.persist(); err != nil {
+			a.state.Profiles = old
+			fail(w, 500, err)
+			return
+		}
+		reply(w, 200, publicProfile(removed))
+	})
 }

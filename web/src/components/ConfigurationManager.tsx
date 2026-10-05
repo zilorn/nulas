@@ -23,6 +23,7 @@ export default function ConfigurationManager(props: { onLoad: (config: Config) =
  const [updateEditor, setUpdateEditor] = createSignal<string | null>(null);
  const [updateURL, setUpdateURL] = createSignal("");
  const [updateHours, setUpdateHours] = createSignal(0);
+ const [deleteConfirm, setDeleteConfirm] = createSignal<string | null>(null);
  const [busy, setBusy] = createSignal(false);
  const [error, setError] = createSignal("");
  const [pollError, setPollError] = createSignal("");
@@ -87,6 +88,15 @@ export default function ConfigurationManager(props: { onLoad: (config: Config) =
   try { props.onLoad(await api<Config>(`profiles/${profile.id}/load`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })); }
   catch (e) { setError((e as Error).message); } finally { setBusy(false); }
  }
+ async function remove(profile: Profile) {
+  setBusy(true); setError(""); setNotice("");
+  try {
+   await api(`profiles/${profile.id}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: "{}" });
+   setProfiles(profiles().filter(p => p.id !== profile.id));
+   setDeleteConfirm(null);
+   setNotice(t("已删除「{p0}」。", { p0: profile.name }));
+  } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+ }
  const networkImport = () => editor() === "import" && importKind() === "network";
  const filtered = () => profiles().filter(p => p.name.toLowerCase().includes(search().toLowerCase()));
  return <>
@@ -125,7 +135,7 @@ export default function ConfigurationManager(props: { onLoad: (config: Config) =
        <label class="form-label">{t("定时更新间隔（小时，0 为关闭）")}<input type="number" required min="0" max="720" step="1" value={updateHours()} onInput={e => setUpdateHours(e.currentTarget.valueAsNumber)} /></label>
        <p class="import-note">{t("更新仅刷新配置库，失败保留原配置；应用到内核需手动操作。")}</p><div class="actions"><button type="submit">{t("保存更新设置")}</button><button type="button" class="secondary" onClick={() => { setUpdateEditor(null); setUpdateURL(""); }}>{t("取消")}</button></div>
       </fieldset></form></Show>
-     </div></Show><div class="profile-bottom"><small>{t("创建于")}{new Date(profile.created).toLocaleDateString(locale())}</small><div class="profile-actions"><Show when={profile.full} fallback={<button class="secondary" disabled={busy()} onClick={() => void load(profile)}>{t("载入编辑 ↗")}</button>}><button class="secondary" disabled={busy()} onClick={() => void submitProfile(profile, "generate")}>{t("生成")}</button><button disabled={busy() || !controller()} onClick={() => void submitProfile(profile, "apply")}>{t("应用配置")}</button></Show></div><Show when={profile.full && !controller()}><small class="profile-offline">{t("内核未连接，暂不可应用")}</small></Show></div></article>}</For></div>
+     </div></Show><div class="profile-bottom"><small>{t("创建于")}{new Date(profile.created).toLocaleDateString(locale())}</small><Show when={deleteConfirm() === profile.id}><p class="profile-delete-note" role="alert">{t("删除「{p0}」？仅从配置库移除，已应用到内核的配置和任务记录不受影响。", { p0: profile.name })}</p></Show><div class="profile-actions"><Show when={deleteConfirm() === profile.id} fallback={<button class="secondary danger" disabled={busy()} onClick={() => { setDeleteConfirm(profile.id); setError(""); setNotice(""); }}>{t("删除")}</button>}><button class="danger-solid" disabled={busy()} onClick={() => void remove(profile)}>{t("确认删除")}</button><button class="secondary" disabled={busy()} onClick={() => setDeleteConfirm(null)}>{t("取消")}</button></Show><Show when={profile.full} fallback={<button class="secondary" disabled={busy()} onClick={() => void load(profile)}>{t("载入编辑 ↗")}</button>}><button class="secondary" disabled={busy()} onClick={() => void submitProfile(profile, "generate")}>{t("生成")}</button><button disabled={busy() || !controller()} onClick={() => void submitProfile(profile, "apply")}>{t("应用配置")}</button></Show></div><Show when={profile.full && !controller()}><small class="profile-offline">{t("内核未连接，暂不可应用")}</small></Show></div></article>}</For></div>
    </Show></Show>
   </section>
  </>;

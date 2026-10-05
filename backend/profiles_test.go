@@ -120,6 +120,64 @@ func TestProfileLibraryLimits(t *testing.T) {
 	}
 }
 
+func TestProfileDeletion(t *testing.T) {
+	a := testApp(t, "")
+	for _, name := range []string{"Keep", "Remove"} {
+		body := fmt.Sprintf(`{"name":%q,"content":"mixed-port: 8888\nmode: direct"}`, name)
+		if w := request(a, "POST", "/api/profiles", body); w.Code != 201 {
+			t.Fatal(w.Body.String())
+		}
+	}
+	remove := a.state.Profiles[1].ID
+	if w := request(a, "DELETE", "/api/profiles/missing", "{}"); w.Code != 404 {
+		t.Fatalf("missing profile: %d %s", w.Code, w.Body.String())
+	}
+	w := request(a, "DELETE", "/api/profiles/"+remove, "{}")
+	if w.Code != 200 || strings.Contains(w.Body.String(), "document") {
+		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
+	}
+	if len(a.state.Profiles) != 1 || a.state.Profiles[0].Name != "Keep" || a.state.Config.Port != 7890 {
+		t.Fatal("deletion touched other state")
+	}
+	b, err := newApp(a.dir, "", "")
+	if err != nil || len(b.state.Profiles) != 1 || b.state.Profiles[0].Name != "Keep" {
+		t.Fatalf("deletion not persisted: %v", err)
+	}
+	// Deleting frees the name for reuse and leaves a fresh ID.
+	if w := request(b, "POST", "/api/profiles", `{"name":"Remove","content":"mode: rule"}`); w.Code != 201 {
+		t.Fatalf("name not freed: %d %s", w.Code, w.Body.String())
+	}
+	if b.state.Profiles[1].ID == remove {
+		t.Fatal("reused deleted profile ID")
+	}
+	// A profile referenced by a pending job must survive until the worker is done.
+	pending := b.state.Profiles[1].ID
+	if w := request(b, "POST", "/api/jobs", `{"action":"generate","profileId":"`+pending+`"}`); w.Code != 202 {
+		t.Fatal(w.Body.String())
+	}
+	if w := request(b, "DELETE", "/api/profiles/"+pending, "{}"); w.Code != 409 || len(b.state.Profiles) != 2 {
+		t.Fatalf("deleted profile used by pending job: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestProfileDeletionPersistenceFailureRollsBack(t *testing.T) {
+	a := testApp(t, "")
+	if w := request(a, "POST", "/api/profiles", `{"name":"Kept","content":"mode: rule"}`); w.Code != 201 {
+		t.Fatal(w.Body.String())
+	}
+	id := a.state.Profiles[0].ID
+	// Force atomic rename to fail and verify memory is restored.
+	if err := os.Remove(filepath.Join(a.dir, "state.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(a.dir, "state.json"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if w := request(a, "DELETE", "/api/profiles/"+id, "{}"); w.Code != 500 || len(a.state.Profiles) != 1 {
+		t.Fatal("deletion failure did not roll back")
+	}
+}
+
 func TestNetworkImport(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" {
