@@ -81,6 +81,38 @@ class SetupTests(unittest.TestCase):
                     setup.dependencies(Path(temporary))
                 unpack.assert_not_called()
 
+    def test_managed_core_honours_active_version_pointer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            directory = home / 'runtime/core'
+            directory.mkdir(parents=True)
+            self.assertEqual(setup.managed_core(home), directory / setup.core_binary_name())
+            (directory / 'active-version').write_text('v1.19.0')
+            self.assertEqual(setup.managed_core(home),
+                             directory / 'versions/v1.19.0' / setup.core_binary_name())
+            (directory / 'active-version').write_text('not-a-version')
+            self.assertEqual(setup.managed_core(home), directory / setup.core_binary_name())
+
+    def test_install_core_downloads_and_defers_failures_to_startup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            installer = home / 'source/scripts/install_core.py'
+            installer.parent.mkdir(parents=True)
+            installer.write_text('')
+            runtime = home / 'runtime/core'
+            with patch.object(setup, 'command') as run:
+                self.assertTrue(setup.install_core(home, sys.executable))
+            run.assert_called_once_with(sys.executable, installer, '--output', runtime)
+            binary = runtime / setup.core_binary_name()
+            binary.parent.mkdir(parents=True)
+            binary.write_text('core')
+            with patch.object(setup, 'command') as run:
+                self.assertTrue(setup.install_core(home, sys.executable))
+            run.assert_not_called()  # an existing core is never overwritten
+            binary.unlink()
+            with patch.object(setup, 'command', side_effect=subprocess.CalledProcessError(1, 'installer')):
+                self.assertFalse(setup.install_core(home, sys.executable))
+
     @unittest.skipIf(os.name == 'nt', 'POSIX shell configuration')
     def test_shell_paths_preserve_bytes_modes_and_symlinks(self):
         with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {}, clear=True):

@@ -26,6 +26,13 @@ import zipfile
 
 REPOSITORY = 'https://github.com/zilorn/nulas.git'
 TIMEOUT = 1800
+CORE_VERSION = re.compile(r'^v[0-9]+\.[0-9]+\.[0-9]+$')
+
+
+def step(message):
+    # Long downloads and builds must keep printing progress, or a piped
+    # installer looks stalled and users assume it never started.
+    print(message, flush=True)
 
 
 def command(*args, cwd=None, capture=False, timeout=TIMEOUT):
@@ -196,7 +203,9 @@ def package_install(packages):
 
 
 def dependencies(home):
+    step('Checking required components: Git, Node.js 24+, Go 1.23+...')
     if not version_ok('git', (2, 0)):
+        step('Installing Git with the system package manager...')
         package_install(['git'])
     if not shutil.which('git'):
         raise RuntimeError('Git still unavailable; reopen the terminal and rerun')
@@ -214,6 +223,7 @@ def dependencies(home):
         suffix = '.zip' if system == 'win' else '.tar.gz'
         filename = f'node-{version}-{system}-{arch}{suffix}'
         base = f'https://nodejs.org/dist/{version}/'
+        step('Downloading Node.js ' + version + '...')
         sums = download(base + 'SHASUMS256.txt').decode()
         digest = next((fields[0] for line in sums.splitlines()
                        if len(fields := line.split()) == 2 and fields[1] == filename), None)
@@ -234,6 +244,7 @@ def dependencies(home):
         suffix = '.zip' if system == 'win' else '.tar.gz'
         target = tools / asset['version']
         if not target.exists():
+            step('Downloading Go ' + asset['version'] + '...')
             unpack(download('https://go.dev/dl/' + asset['filename']), asset['sha256'], target, suffix)
         os.environ['PATH'] = str(target / 'go' / 'bin') + os.pathsep + os.environ['PATH']
     if not version_ok('node', (24, 0)) or not version_ok('go', (1, 23)):
@@ -248,6 +259,7 @@ def activate_tools(metadata):
 
 def build(source, tools):
     activate_tools({'tools': tools})
+    step('Building Nulas from ' + str(source) + '...')
     web = source / 'web'
     manager = json.loads((web / 'package.json').read_text())['packageManager']
     # Reuse pnpm only when it matches this checkout's locked packageManager.
@@ -258,11 +270,16 @@ def build(source, tools):
         npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
         if not npm:
             raise RuntimeError('npm is required to provision the pinned pnpm')
+        step('Provisioning the pinned pnpm ' + expected + '...')
         prefix = source / '.build-tools'
         command(npm, 'install', '--prefix', prefix, '--no-audit', '--no-fund', manager)
         pnpm = [tools['node'], prefix / 'node_modules/pnpm/bin/pnpm.cjs']
-    for args in [('install', '--frozen-lockfile'), ('typecheck',), ('build',)]:
+    for args, label in [(('install', '--frozen-lockfile'), 'Installing locked frontend dependencies'),
+                        (('typecheck',), 'Type checking the frontend'),
+                        (('build',), 'Building the frontend')]:
+        step(label + '...')
         command(*pnpm, *args, cwd=web)
+    step('Building the backend...')
     (source / 'bin').mkdir(exist_ok=True)
     command(tools['go'], 'build', '-o', source / 'bin' / binary_name(), '.', cwd=source / 'backend')
     if not (web / '.output/server/index.mjs').is_file():
@@ -273,10 +290,50 @@ def binary_name():
     return 'nulas.exe' if os.name == 'nt' else 'nulas'
 
 
+def core_binary_name():
+    return 'mihomo.exe' if os.name == 'nt' else 'mihomo'
+
+
+def managed_core(home):
+    # Mirror the backend's corePath resolution: the active-version pointer, when
+    # valid, selects a cached version directory instead of the install root.
+    directory = home / 'runtime/core'
+    try:
+        tag = (directory / 'active-version').read_text(encoding='utf-8').strip()
+    except OSError:
+        tag = ''
+    if CORE_VERSION.match(tag):
+        directory = directory / 'versions' / tag
+    return directory / core_binary_name()
+
+
+def install_core(home, python):
+    """Download the managed core during installation.
+
+    Failure is deliberately non-fatal: the running installation queues the same
+    download when it starts, so the installer only reports the deferral.
+    """
+    target = managed_core(home)
+    if target.is_file():
+        step('Managed Mihomo core already present: ' + str(target))
+        return True
+    step('Downloading the official Mihomo core (network required); this can take a minute...')
+    installer = home / 'source/scripts/install_core.py'
+    try:
+        command(python, installer, '--output', target.parent)
+    except (OSError, subprocess.SubprocessError) as error:
+        print('Core download failed: ' + str(error), file=sys.stderr, flush=True)
+        print('Nulas will retry installing the core automatically when it starts.', file=sys.stderr, flush=True)
+        return False
+    step('Managed Mihomo core installed: ' + str(target))
+    return True
+
+
 def stage(home, metadata, commit):
     # Every build uses a fresh checkout. Never mutate the active version or user data.
     release = home / 'releases' / (commit[:12] + '-' + str(time.time_ns()))
     release.parent.mkdir(exist_ok=True)
+    step('Checking out commit ' + commit[:12] + ' into ' + release.name + '...')
     command('git', 'clone', '--no-hardlinks', '--no-checkout', home / 'source', release)
     command('git', 'checkout', '--detach', commit, cwd=release)
     build(release, metadata['tools'])
@@ -689,14 +746,19 @@ def install(home, repository, branch):
             raise RuntimeError('Installation already exists; use nulas update. An incomplete installation must be inspected first.')
         if (home / 'bin').exists():
             raise RuntimeError('Refusing to overwrite an existing bin directory')
+        step('Installing Nulas into ' + str(home) + '...')
         tools = dependencies(home)
+        step('Cloning ' + repository + ' (' + branch + ')...')
         command('git', 'clone', '--single-branch', '--branch', branch, repository, home / 'source')
         commit = command('git', 'rev-parse', 'HEAD', cwd=home / 'source', capture=True)
         metadata = {'repository': repository, 'branch': branch, 'tools': tools, 'autoUpdate': False}
         stage(home, metadata, commit)
+        core = install_core(home, tools['python'])
         launchers(home)
         add_path(home)
-    print(f'Installed Nulas in {home}. Reopen your terminal, then run nulas run. Automatic updates are disabled.')
+    step(f'Installed Nulas in {home}. Reopen your terminal, then run nulas run. Automatic updates are disabled.')
+    if not core:
+        step('The core download did not finish now; Nulas will install it on first startup.')
 
 
 def main():

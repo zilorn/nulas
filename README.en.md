@@ -11,7 +11,7 @@ A browser-based quick configuration dashboard for [MetaCubeX/mihomo · Meta](htt
 - **Nodes**: Read the connected core, select members of manual proxy groups (Selector), switch between rule / global / direct modes and show the MATCH fallback outbound, with latency tests for a single node and for the current group in bulk.
 - **Background tasks**: Install, generate, apply, TUN and system proxy operations enter a durable single-worker queue that survives closing the page.
 - **System settings**: TUN, system proxy, start at login and desktop tray switches, with preferences written to the backend's atomic state file.
-- **Managed core**: Downloads an official core on demand and starts it with its minimal direct configuration; setting `MIHOMO_CONTROLLER` connects to an existing core instead.
+- **Managed core**: Downloads an official core during installation, retries the download at startup when it fails, and starts it with its minimal direct configuration; setting `MIHOMO_CONTROLLER` connects to an existing core instead.
 
 Core credentials stay on the server and the API listens on the loopback address by default. This version targets local use; the authentication and TLS required for remote deployment are not implemented.
 
@@ -19,7 +19,7 @@ Core credentials stay on the server and the API listens on the loopback address 
 
 ### Quick install (Windows / macOS / Linux)
 
-Existing dependencies that meet the version requirements are reused instead of being installed again. The installer clones this repository, installs the locked frontend dependencies, checks types, builds the frontend and backend, and finally adds `nulas` to the user PATH. It does not start services, enable the tray or change host networking.
+Existing dependencies that meet the version requirements are reused instead of being installed again. The installer clones this repository, installs the locked frontend dependencies, checks types, builds the frontend and backend, downloads the official Mihomo core into `runtime/core/`, and finally adds `nulas` to the user PATH. It does not start services, enable the tray or change host networking. Progress is printed in stages, so long dependency downloads and builds are never silent.
 
 Linux / macOS (runs under bash, zsh or fish):
 
@@ -47,6 +47,7 @@ You can also clone the repository, inspect the scripts and then run `sh scripts/
 
 - **Platform detection**: Supports x64 and arm64 on Linux / macOS / Windows. On Linux it installs missing Git / Python through apt (Ubuntu / Debian), pacman (Arch), dnf (Fedora), zypper (openSUSE) or apk (Alpine); package manager operations may require sudo. On musl environments such as Alpine, install a suitable Node.js and Go version beforehand; the automatically downloaded official Linux Node.js packages require glibc.
 - **Dependency reuse**: Uses existing Git, Python 3.10+, Node.js 24+ and Go 1.23+. pnpm is reused only when its version exactly matches the current `packageManager`; otherwise it is installed into a separate build directory for that version. When a suitable Node or Go is missing, the official package is downloaded with SHA256 verification and installed inside the Nulas directory without overwriting system versions.
+- **Core download**: Installation runs `scripts/install_core.py` to download and verify the official Mihomo core into `runtime/core/`. A failed download never aborts the installation: the software is still installed with a visible notice, and Nulas retries the core download automatically on first startup. An existing core, including a version directory selected by `active-version`, is never overwritten.
 - **Platform package managers**: On macOS, missing Git / Python is installed with Homebrew, and a missing Homebrew triggers its [official installer](https://docs.brew.sh/Installation) (which may request administrator authorization and install the Xcode command line tools). On Windows, missing Git / Python is installed with winget (the system must already have App Installer; the installer may trigger system permission prompts). Desktop tray dependencies are never installed automatically.
 - **Install directory**: Defaults to `~/.local/share/nulas` on Linux / macOS and `%LOCALAPPDATA%\Nulas` on Windows. On Unix use `sh scripts/install.sh --home /absolute/path`; in PowerShell use `./scripts/install.ps1 -HomeDir 'D:\Apps\Nulas'`. Use `--repository` / `--branch` (`-Repository` / `-Branch` in PowerShell) to choose a source; updates always track the branch selected at install time.
 - **PATH**: On Unix, existing configuration is preserved: the path is appended to bash's `.bashrc`, `.profile` / existing login configuration, zsh's `${ZDOTDIR:-$HOME}/.zshrc`, and fish's `conf.d/nulas.fish`. On Windows it writes to the current user PATH and broadcasts the environment change. Reopen your terminal; already running parent terminals may need a restart. The installer and `nulas run` work without Bash 4.3.
@@ -107,11 +108,11 @@ Automatic updates compile and run new code from the selected repository branch, 
 | Node.js | 24+ (development, builds and the SSR runtime) |
 | pnpm | Matches `packageManager` in `web/package.json` |
 | Go | 1.23+ |
-| Python 3 | Downloads the core on demand, installs the user-level service and runs the tray helper script |
+| Python 3 | Downloads the core at install / startup, installs the user-level service and runs the tray helper script |
 | Bash | 4.3+ (start scripts; use a newer Bash when the macOS system Bash is too old) |
 | systemd | Optional; needed only for the Linux user-level background service and start at login |
 
-Installing and building never start services and never download or run a core.
+The installation never starts services or executes a core; the build never downloads a core.
 
 ### Build
 

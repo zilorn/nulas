@@ -11,7 +11,7 @@
 - **节点管理**：读取已连接内核，选择手动代理组（Selector）成员，切换规则 / 全局 / 直连模式并显示 MATCH 兜底出口，支持单节点和当前组批量延迟测速。
 - **后台任务**：安装、生成、应用、TUN、系统代理等操作进入持久化单 worker 队列，关闭网页不中断。
 - **系统设置**：虚拟网卡（TUN）、系统代理、开机自启与桌面托盘开关，偏好写入后端原子状态文件。
-- **托管内核**：默认按需下载官方内核并以其基础直连配置启动；设置 `MIHOMO_CONTROLLER` 时改为连接已有内核。
+- **托管内核**：安装时下载官方内核，启动时按需补齐，并以其基础直连配置启动；设置 `MIHOMO_CONTROLLER` 时改为连接已有内核。
 
 核心凭据只保存在服务端，API 默认仅监听回环地址。当前版本面向本机使用，远程部署所需的认证与 TLS 尚未实现。
 
@@ -19,7 +19,7 @@
 
 ### 快速安装（Windows / macOS / Linux）
 
-已有依赖且版本符合要求时直接复用，不重复安装。安装器克隆本仓库、安装锁定的前端依赖、检查类型并编译前后端，最后将 `nulas` 加入用户 PATH。不启动服务、不启用托盘、不修改主机网络。
+已有依赖且版本符合要求时直接复用，不重复安装。安装器克隆本仓库、安装锁定的前端依赖、检查类型并编译前后端，随后下载官方 Mihomo 内核到 `runtime/core/`，最后将 `nulas` 加入用户 PATH。不启动服务、不启用托盘、不修改主机网络。安装过程分阶段打印进度，耗时的依赖下载与编译不会静默。
 
 Linux / macOS（bash、zsh、fish 均可执行）：
 
@@ -47,6 +47,7 @@ sh /tmp/nulas-install.sh
 
 - **系统检测**：支持 Linux / macOS / Windows 的 x64、arm64。Linux 支持 apt（Ubuntu / Debian）、pacman（Arch）、dnf（Fedora）、zypper（openSUSE）、apk（Alpine）的缺失 Git / Python 安装；包管理操作可能要求 sudo。Alpine 等 musl 环境请预先安装满足版本的 Node.js、Go；自动下载的 Linux Node.js 官方包要求 glibc。
 - **依赖复用**：使用现有 Git、Python 3.10+、Node.js 24+、Go 1.23+；pnpm 仅在版本与当前 `packageManager` 完全一致时复用，否则安装到该版本的独立构建目录。缺少合格 Node / Go 时下载官方包并校验 SHA256，安装在 Nulas 目录，不覆盖系统版本。
+- **内核下载**：安装时调用 `scripts/install_core.py` 下载并校验官方 Mihomo 内核到 `runtime/core/`。下载失败不会中断安装：软件仍会安装完成并给出提示，Nulas 首次启动时会自动重试安装内核。已有内核（含 `active-version` 指向的版本目录）不会被覆盖。
 - **平台包管理器**：macOS 缺少 Git / Python 时使用 Homebrew，缺少 Homebrew 时调用其[官方安装器](https://docs.brew.sh/Installation)（可能请求管理员授权与安装 Xcode 命令行工具）；Windows 缺少 Git / Python 时使用 winget（需系统已有 App Installer，安装器可能触发系统权限提示）。不自动安装桌面托盘依赖。
 - **安装目录**：Linux / macOS 默认 `~/.local/share/nulas`，Windows 默认 `%LOCALAPPDATA%\Nulas`。Unix 可使用 `sh scripts/install.sh --home /absolute/path`；PowerShell 使用 `./scripts/install.ps1 -HomeDir 'D:\Apps\Nulas'`。可用 `--repository` / `--branch`（PowerShell 为 `-Repository` / `-Branch`）指定来源；更新始终跟踪安装时指定的分支。
 - **PATH**：Unix 保留现有配置，向 bash 的 `.bashrc`、`.profile` / 已有登录配置、zsh 的 `${ZDOTDIR:-$HOME}/.zshrc` 追加路径，同时配置 fish 的 `conf.d/nulas.fish`；Windows 写入当前用户 PATH 并广播环境变化。请重新打开终端；已经运行的父终端可能需重新启动。无需 Bash 4.3 即可运行安装器与 `nulas run`。
@@ -107,11 +108,11 @@ nulas update --watch            # 独立前台更新调度器，适合只启动�
 | Node.js | 24+（开发、构建与 SSR 运行） |
 | pnpm | 与 `web/package.json` 的 `packageManager` 一致 |
 | Go | 1.23+ |
-| Python 3 | 按需下载内核、安装用户级服务与运行托盘辅助脚本 |
+| Python 3 | 安装 / 启动时下载内核、安装用户级服务与运行托盘辅助脚本 |
 | Bash | 4.3+（启动脚本；macOS 自带 Bash 较旧时请使用新版） |
 | systemd | 可选，仅 Linux 用户级后台服务与开机自启需要 |
 
-安装与构建过程不会启动服务、不会下载或执行内核。
+安装过程不会启动服务、不执行内核，构建过程不下载内核。
 
 ### 构建
 

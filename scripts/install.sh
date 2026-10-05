@@ -13,12 +13,16 @@ if [ "$(id -u)" = 0 ]; then
   echo 'Run this installer as your normal user; package installation may ask for sudo.' >&2
   exit 1
 fi
+echo 'Nulas installer: preparing Python, build tools and the managed Mihomo core.'
+echo 'Downloads and builds can take several minutes; progress is printed as it runs.'
 if ! command -v python3 >/dev/null 2>&1; then
+  echo 'Python 3 was not found; installing it first...'
   case "$(uname -s)" in
     Darwin)
       PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
       export PATH
       if ! command -v brew >/dev/null 2>&1; then
+        echo 'Homebrew was not found; installing it (this may request administrator approval)...'
         BREW_INSTALLER=$(mktemp)
         trap 'rm -f "$BREW_INSTALLER"' EXIT HUP INT TERM
         curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$BREW_INSTALLER"
@@ -56,6 +60,7 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/setup.py" ]; then
 fi
 TEMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TEMP_DIR"' EXIT HUP INT TERM
+echo 'Downloading the Nulas setup script...'
 python3 - "$TEMP_DIR/setup.py" <<'PY'
 import sys, urllib.request
 with urllib.request.urlopen('https://raw.githubusercontent.com/zilorn/nulas/main/scripts/setup.py', timeout=60) as response:
