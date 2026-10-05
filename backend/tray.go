@@ -17,10 +17,11 @@ import (
 )
 
 type trayProcess struct {
-	cmd   *exec.Cmd
-	input io.WriteCloser
-	done  chan struct{}
-	ready bool
+	cmd     *exec.Cmd
+	input   io.WriteCloser
+	done    chan struct{}
+	ready   bool
+	waiting bool
 }
 type TrayStatus struct {
 	Supported bool   `json:"supported"`
@@ -121,10 +122,11 @@ func (a *App) startTray() {
 				ok = true
 				break
 			}
-			if strings.HasPrefix(line, "STATUS ") || strings.HasPrefix(line, "ERROR ") {
+			if strings.HasPrefix(line, "STATUS ") || strings.HasPrefix(line, "ERROR ") || strings.HasPrefix(line, "WAIT ") {
 				a.mu.Lock()
 				if a.tray == process {
 					a.trayError = strings.SplitN(line, " ", 2)[1]
+					process.waiting = strings.HasPrefix(line, "WAIT ")
 				}
 				a.mu.Unlock()
 			}
@@ -178,16 +180,31 @@ func (a *App) startTray() {
 	case <-time.After(2 * time.Second):
 		// Installation continues in the helper; GET exposes progress and readiness.
 		go func() {
-			select {
-			case ok := <-ready:
-				if ok {
+			deadline := time.Now().Add(10 * time.Minute)
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case ok := <-ready:
+					if ok {
+						return
+					}
+				case <-process.done:
 					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					a.mu.Lock()
+					waiting := process.waiting
+					a.mu.Unlock()
+					if waiting {
+						deadline = time.Now().Add(10 * time.Minute)
+					}
+					if time.Now().Before(deadline) {
+						continue
+					}
 				}
-			case <-process.done:
-				return
-			case <-ctx.Done():
-				return
-			case <-time.After(10 * time.Minute):
+				break
 			}
 			a.trayMu.Lock()
 			a.mu.Lock()

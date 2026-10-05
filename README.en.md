@@ -267,6 +267,8 @@ Commands run from any directory, and service commands act on the current user's 
 
 ### Desktop tray (optional)
 
+When a Linux user-level service starts before the desktop at boot, the tray keeps waiting and reports why. After login it refreshes desktop session variables for the same user and waits for GTK and the AppIndicator tray host before starting, without toggling the switch again. This wait is exempt from the ten-minute dependency installation timeout; disabling the tray or stopping the backend cancels it. Without a desktop or tray extension it continues waiting and does not report the tray as running.
+
 The tray menu follows the web interface language (Chinese or English). Browsers share one tray, so the last synchronized language wins. The backend saves the tray language and restores it after restarting; older state files default to Chinese.
 
 The tray is off by default and provides entries for the panel, node management and background tasks, using the default browser. Enabling the tray on Linux checks dependencies and installs GTK3, PyGObject and AyatanaAppIndicator3 through apt-get, dnf or pacman when they are missing (requesting administrator authorization through pkexec, or using authorized sudo). Python tray packages are installed into a separate environment under the user cache directory `~/.cache/nulas/tray-pythonX.Y` without changing the system Python, and suitable existing dependencies are reused. Installation continues in the background while the interface shows progress or the failure reason, and you can disable the tray or retry. Dependencies are not installed without a desktop session; unsupported distributions require manual installation. `NULAS_PYTHON` should point to a Python that can load the distribution's GI bindings.
@@ -279,7 +281,7 @@ python3 -m pip install -r scripts/requirements-tray.txt
 python -m pip install -r scripts/requirements-tray.txt
 ```
 
-The automatic installation logic is verified with mocked package managers, covering dependency reuse, isolated environments, rejection without a desktop session and cancelled installs; real system package installation and desktop authorization/tray display have not been verified on real hardware.
+The automatic installation logic is verified with mocked package managers, covering dependency reuse, isolated environments, desktop waiting and cancellation and cancelled installs; real system package installation and desktop authorization/tray display have not been verified on real hardware.
 
 macOS/Windows use the native pystray backend; Linux needs a PyGObject runtime for GTK/AppIndicator plus a desktop tray area, and GNOME usually also needs the AppIndicator extension. Insufficient installation or desktop support shows a failure with a retry entry point. Turning the tray off interrupts an unfinished unprivileged installation; a system package manager that already received administrator authorization may still finish the current transaction.
 

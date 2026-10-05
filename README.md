@@ -266,6 +266,8 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 
 ### 桌面托盘（可选）
 
+Linux 用户级服务在开机早于桌面启动时，会保持等待并显示等待原因；登录后刷新同一用户的桌面会话变量，等待 GTK 与 AppIndicator 托盘区域就绪再启动，无需重新切换开关。等待不受依赖安装的十分钟超时限制，关闭托盘或停止后台会取消等待。无桌面或未启用托盘扩展时会持续等待，不会显示为已启动。
+
 托盘菜单跟随网页的中英文语言选择；多个浏览器共用一个托盘，最后同步的语言生效。后端保存托盘语言并在重启时恢复；旧状态默认使用中文。
 
 托盘默认关闭，提供打开面板、节点管理与后台任务入口，使用默认浏览器。Linux 开启托盘时会检查依赖，缺失时自动通过 apt-get、dnf 或 pacman 安装 GTK3、PyGObject 与 AyatanaAppIndicator3（通过 pkexec 请求管理员授权，或使用已授权的 sudo）。Python 托盘包安装在用户缓存目录 `~/.cache/nulas/tray-pythonX.Y` 的独立环境中，不改动系统 Python；已有可用依赖时直接复用。安装在后台继续，界面显示进度或失败原因，可关闭托盘或重试。无桌面会话时不会安装依赖；不支持的发行版需手动安装。`NULAS_PYTHON` 应指向能加载发行版 GI 绑定的 Python。
@@ -278,7 +280,7 @@ python3 -m pip install -r scripts/requirements-tray.txt
 python -m pip install -r scripts/requirements-tray.txt
 ```
 
-自动安装逻辑通过模拟包管理器验证，包含依赖复用、隔离环境、无桌面拒绝与取消安装；真实系统包安装和桌面授权/托盘显示尚未实机验证。
+自动安装逻辑通过模拟包管理器验证，包含依赖复用、隔离环境、桌面等待与取消与取消安装；真实系统包安装和桌面授权/托盘显示尚未实机验证。
 
 macOS/Windows 使用 pystray 原生后端；Linux 需要 GTK/AppIndicator 的 PyGObject 运行环境与桌面托盘区域，GNOME 通常还需 AppIndicator 扩展。安装或桌面支持不足时会显示失败并提供重试入口。关闭托盘会中断尚未完成的普通用户安装；已获管理员授权的系统包管理器可能继续完成当前事务。
 

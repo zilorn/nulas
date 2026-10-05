@@ -252,3 +252,45 @@ func TestTrayInstallationProgressAndFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestTrayDesktopWaitCanBeCancelled(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("Python unavailable")
+	}
+	script := filepath.Join(t.TempDir(), "helper.py")
+	if err := os.WriteFile(script, []byte("import sys\nprint('WAIT 正在等待桌面', flush=True)\nsys.stdin.buffer.read()\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NULAS_PYTHON", python)
+	t.Setenv("NULAS_TRAY_SCRIPT", script)
+	a := testApp(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.trayContext, a.trayURL = ctx, "http://127.0.0.1:8080"
+	defer func() { a.trayMu.Lock(); a.stopTray(); a.trayMu.Unlock() }()
+	if w := request(a, "PUT", "/api/runtime/tray", `{"enabled":true}`); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if status := a.trayStatus(); !status.Enabled || status.Running || status.Message != "正在等待桌面" {
+		t.Fatal(status)
+	}
+	a.mu.Lock()
+	process := a.tray
+	waiting := process != nil && process.waiting
+	a.mu.Unlock()
+	if !waiting {
+		t.Fatal("desktop wait must suspend the startup timeout")
+	}
+	if w := request(a, "PUT", "/api/runtime/tray", `{"enabled":false}`); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	select {
+	case <-process.done:
+	case <-time.After(time.Second):
+		t.Fatal("disabled tray still waiting")
+	}
+	if status := a.trayStatus(); status.Enabled || status.Running {
+		t.Fatal(status)
+	}
+}

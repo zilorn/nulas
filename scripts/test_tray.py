@@ -57,7 +57,7 @@ class NativeHelperContractTests(unittest.TestCase):
         output = io.StringIO()
         stdin = types.SimpleNamespace(buffer=io.BytesIO())
         with patch.dict("sys.modules", {"pystray": native, "PIL": pillow}), \
-                patch("tray_dependencies.prepare_linux"), \
+                patch("tray_dependencies.prepare_linux"), patch("tray_session.wait_for_session"), \
                 patch.object(tray.sys, "argv", ["tray.py", "--url", "http://127.0.0.1:8080"] + arguments), \
                 patch.object(tray.sys, "stdin", stdin), patch.object(tray.sys, "stdout", output), \
                 patch.object(tray.webbrowser, "open") as open_browser:
@@ -66,6 +66,6 @@ class NativeHelperContractTests(unittest.TestCase):
                 item.action(instances[0], item)
         self.assertEqual([item.title for item in instances[0].menu], labels)
         self.assertTrue(instances[0].visible)
-        self.assertEqual(output.getvalue(), "READY\n")
+        self.assertTrue(output.getvalue().endswith("READY\n"))
         self.assertEqual([call.args[0] for call in open_browser.call_args_list],
             ["http://127.0.0.1:8080/", "http://127.0.0.1:8080/nodes", "http://127.0.0.1:8080/tasks"])

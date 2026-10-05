@@ -31,7 +31,11 @@ def main():
     labels = MENU_LABELS[args.language]
     if sys.platform == "linux":
         from tray_dependencies import prepare_linux
+        from tray_session import wait_for_session, desktop_ready
+        wait_for_session()
+        print("STATUS 正在准备 Linux 托盘依赖。", flush=True)
         prepare_linux()
+        wait_for_session(desktop_ready)
     import pystray
     from PIL import Image, ImageDraw
 
