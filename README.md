@@ -250,6 +250,8 @@ Mihomo 需要启用 `external-controller` 和对应的 `secret`。
 - **后台任务（`/tasks`）**：状态按 `queued → running → succeeded / failed` 持久保存，网页每两秒更新；失败可重新提交。操作失败不会自动重试。
 - **系统设置**：虚拟网卡（TUN）、系统代理、开机自启与托盘开关。开关状态来自后端回读，未满足运行条件时显示具体原因；设置作用于后端所在主机。
 
+当完整配置在 MMDB 模式（`geodata-mode: false`，默认值）下包含 GEOIP 规则，或 DNS fallback 启用 GEOIP 过滤时，Nulas 会在应用配置和恢复托管内核前准备数据库。缺少数据库时默认下载 MetaCubeX 的 `country.mmdb`，支持 `telegram` 等分类；每个源最多尝试两次，每次下载最多 15 秒、64 MiB，准备阶段最多两分钟。已知 MetaCubeX 官方资源地址失败后会尝试其[官方列出的 CDN](https://github.com/MetaCubeX/meta-rules-dat#下载地址)，自定义 `geox-url.mmdb` 仅重试原地址。下载使用直接连接，不依赖尚未应用的代理。数据库通过已安装 Mihomo 的 `-t` 模式在临时目录校验后，原子保存到 `NULAS_DATA_DIR/managed-core/Country.mmdb`；校验不启动代理监听。现有 `Country.mmdb`、`geoip.metadb` 或 `geoip.db` 会先检查，不覆盖；损坏时请将旧文件移到其他目录保留，然后手动重新应用。网络不可达时也可离线放入兼容数据库。下载地址和凭据不进入任务错误，准备失败不会调用配置应用接口，失败任务仍需手动重试。外部控制器的数据库由其自身管理，请修改原配置的 `geox-url.mmdb` 或将数据库放到外部内核工作目录，再重新导入并应用。DAT、GEOSITE、ASN 和 provider 数据仍由 Mihomo 自身下载。
+
 ### 配置变量
 
 | 变量 | 默认值 | 用途 |

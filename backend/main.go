@@ -445,6 +445,9 @@ func (a *App) runJob(j Job) error {
 		if err != nil {
 			return err
 		}
+		if err = a.prepareManagedMMDB(string(payload)); err != nil {
+			return err
+		}
 		b, e = json.Marshal(map[string]string{"payload": string(payload)})
 		if e != nil {
 			return e

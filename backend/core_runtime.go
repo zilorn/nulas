@@ -60,6 +60,17 @@ func (a *App) startCore(c Config) error {
 	if err != nil {
 		return failStart(err)
 	}
+	// Downloads run outside the state lock so task/status requests remain usable.
+	content, marshalErr := json.Marshal(config)
+	if marshalErr != nil {
+		return failStart(marshalErr)
+	}
+	a.mu.Unlock()
+	err = a.prepareManagedMMDB(string(content))
+	a.mu.Lock()
+	if err != nil {
+		return failStart(err)
+	}
 	// The controller address is announced at info level, including for saved silent configs.
 	config["log-level"] = "info"
 	data, err := json.Marshal(config)
